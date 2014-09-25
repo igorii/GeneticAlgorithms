@@ -29,7 +29,7 @@
 
   ;; Initialize one random individual
   (define (init-one strlen) 
-    (map (λ (x) (if (< 0.5 (random)) 0 1)) 
+    (map (λ (x) (if (> 0.5 (random)) 1 0))
          (range 0 strlen)))
 
   (map (λ (x) (init-one strlen)) ; Generate the entire population
@@ -37,13 +37,18 @@
 
 ;(: fitness (Chromosome -> Number))
 ;; Assess the fitness of an individual
-(define (fitness individual)
-  (foldl + 0 individual))
+(define (fitness individual) (foldl + 0 individual))
+(define (total-fitness fs)   (foldl + 0 fs))
 
-;(: mutate (Chromosome -> Chromosome))
+;(: assess-all ((Listof Chromosome) -> (Listof Number)))
+;; Assess the fitness of every individual
+(define assess-all map)
+
+;(: mutate (Real Chromosome -> Chromosome))
 ;; Apply a random mutation to an individual
-(define (mutate individual) 
-  null)
+(define (mutate p individual) 
+  (define (swap x) (if (= x 0) 1 0))
+  (map (λ (x) (if (>= p (random)) (swap x) x)) individual))
 
 ;(: recombine (Chromosome Chromosome Number -> (Listof Chromosome)))
 ;; Apply recombinational crossover to two parents to
@@ -58,22 +63,51 @@
           (f (cdr p1) (cdr p2) (add1 curr) (append acc (list next))))))
     (f parent1 parent2 0 '()))
 
+  ;; Create the two children
   (list (get-child <= cross-point parent1 parent2)
         (get-child >  cross-point parent1 parent2)))
 
+;; from slide 19
+(define (selection-roulette pop fs)
+  (define (f wp partial-sum pop fs)
+    (let ([next-fitness (+ partial-sum (car fs))])
+      (cond [(null? (cdr fs))    (car pop)]
+            [(> next-fitness wp) (car pop)]
+            [else                (f wp next-fitness (cdr pop) (cdr fs))])))
+
+  (f (* (random) (total-fitness fs)) 0 pop fs))
+
+
+
+
+;; TEST
+;;
+(define population (initialize *string-length* *population-size*))
+(define fs (assess-all fitness population))
+(display population) (newline)
+(define parent1 (selection-roulette population fs))
+(define parent2 (selection-roulette population fs))
+;
+fs
+(fitness parent1)
+(fitness parent2)
+
 ;;(map fitness (initialize *string-length* *population-size*))
-(define cp (random-under *string-length*))
-(display "Crossover point ") (display cp) (newline)
-
-(define parents (initialize *string-length* 2))
-(display "Parent 1 ")
-(print-with-cross-point (car parents) cp)
-(display "Parent 2 ")
-(print-with-cross-point (cadr parents) cp)
-
-(define children (recombine (car parents) (cadr parents) cp))
-(display "Child  1 ")
-(print-with-cross-point (car children) cp)
-(display "Child  2 ")
-(print-with-cross-point (cadr children) cp)
-
+;(define cp (random-under *string-length*))
+;(display "Crossover point ") (display cp) (newline)
+;
+;(define parents (initialize *string-length* 2))
+;(display "Parent 1 ")
+;(print-with-cross-point (car parents) cp)
+;(display "Parent 2 ")
+;(print-with-cross-point (cadr parents) cp)
+;
+;(define children (recombine (car parents) (cadr parents) cp))
+;(display "Child  1 ")
+;(print-with-cross-point (car children) cp)
+;(display "Child  2 ")
+;(print-with-cross-point (cadr children) cp)
+;(display "Mutation ")
+;(print-with-cross-point (mutate 0.1 (cadr children)) cp)
+;
+;(assess-all fitness (append parents children))
