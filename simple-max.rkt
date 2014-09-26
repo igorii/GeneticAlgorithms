@@ -1,6 +1,6 @@
 #lang racket
 
-(require "general-ga.rkt")
+(require "util.rkt" "general-ga.rkt")
 
 (define (simple-max-fitness strlen)
   (let ([half-mark (/ strlen 2)])
@@ -15,11 +15,12 @@
 
 (define (mutate-individual p individual)
   (define (m x) (+ 1 (random 10)))
-  (map (λ (x) (if (>= p (random)) (m x) x))
+  (map (λ (x) (if (chance p) (m x) x))
        individual))
 
 (run-ga #:string-length     10
         #:population-size   80
+        #:selection-type    'tournament
         #:create-individual create-individual
         #:mutate-fn         mutate-individual
         #:cutoff            ((simple-max-fitness 10) (list 10 10 10 10 10 1 1 1 1 1))
