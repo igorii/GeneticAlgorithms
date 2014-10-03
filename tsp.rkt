@@ -12,71 +12,61 @@
 (define (line-distance p1 p2)
   (sqrt (sqr (+ (- (car  p1) (car  p2))
                 (- (cadr p1) (cadr p2))))))
+(define (get-unused l used) (filter (lambda (x) (not (hash-has-key? used x))) l))
 ;; End utils
 
-;; Crossover helperfn
-(define (phase1 p1 p2 a b new-tour used-map)
-  (define (loop pos new-tour p1 p2 used-map)
-    (cond [(null? p1) (list new-tour used-map)]
-          [(null? p2) (list new-tour used-map)]
-          [(> pos b)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
-          [(< pos a)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
-          [else (loop (add1 pos)
-                      (append new-tour (list (car p1)))
-                      (cdr p1)
-                      (cdr p2)
-                      (hash-set used-map (car p1) #t))]))
-  (loop 0 new-tour p1 p2 used-map))
-
-;; Crossover helperfn
-(define (phase2 p1 p2 a b new-tour used-map)
-  (define (loop pos src-new-tour dest-new-tour p1 p2 used-map)
-    (cond [(null? p1) (list dest-new-tour used-map)]
-          [(null? p2) (list dest-new-tour used-map)]
-          [(and (<= pos b) (>= pos a)) (loop (add1 pos)
-                                             (cdr src-new-tour)
-                                             (append dest-new-tour (list (car src-new-tour))) 
-                                             (cdr p1)
-                                             (cdr p2)
-                                             used-map)]
-          [(hash-has-key? used-map (car p2)) (loop (add1 pos)
-                                                   (cdr src-new-tour)
-                                                   (append dest-new-tour (list (car src-new-tour))) 
-                                                   (cdr p1)
-                                                   (cdr p2)
-                                                   used-map)]
-          [else (begin (display (car p2)) (newline)
-                       (loop (add1 pos)
-                             (cdr src-new-tour)
-                             (append dest-new-tour (list (car p2)))
-                             (cdr p1)
-                             (cdr p2)
-                             (hash-set used-map (car p2) #t)))]))
-  (begin (display "phase2")(newline)
-         (loop 0 new-tour '() p1 p2 used-map)))
-
-(define (get-next-unused p u)
-  (cond [(null? p) p]
-        [(not (hash-has-key? (car p))) p]
-        [else (get-next-unused (cdr p) u)]))
-
-;; This is wrong, needs to be mutual recursion
-;; between p1 and src-new-tour looking for null places
-(define (phase3 p1 p2 new-tour used-map)
-  (define (loop p1 p2 src-new-tour dest-new-tour)
-    (cond [(null? p1) dest-new-tour]
-          [(null? p2) dest-new-tour]
-          [(hash-has-key? used-map (car p2)) (loop (cdr p1)
-                                                   (cdr p2)
-                                                   (cdr src-new-tour)
-                                                   (append dest-new-tour (list (car src-new-tour))))]
-          [else (loop (cdr p1)
-                      (cdr p2)
-                      (cdr src-new-tour)
-                      (append dest-new-tour (list (car p2))))]))
-  (loop p1 p2 new-tour '()))
-
 (define (crossover-partially-mapped p1 p2 strlen) 
+  (define (phase1 p1 p2 a b new-tour used-map)
+    (define (loop pos new-tour p1 p2 used-map)
+      (cond [(null? p1) (list new-tour used-map)]
+            [(null? p2) (list new-tour used-map)]
+            [(> pos b)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
+            [(< pos a)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
+            [else (loop (add1 pos)
+                        (append new-tour (list (car p1)))
+                        (cdr p1)
+                        (cdr p2)
+                        (hash-set used-map (car p1) #t))]))
+    (loop 0 new-tour p1 p2 used-map))
+
+
+  ;; Crossover helperfn
+  (define (phase2 p1 p2 a b new-tour used-map)
+    (define (loop pos src-new-tour dest-new-tour p1 p2 used-map)
+      (cond [(null? p1) (list dest-new-tour used-map)]
+            [(null? p2) (list dest-new-tour used-map)]
+            [(and (<= pos b) (>= pos a)) (loop (add1 pos)
+                                               (cdr src-new-tour)
+                                               (append dest-new-tour (list (car src-new-tour))) 
+                                               (cdr p1)
+                                               (cdr p2)
+                                               used-map)]
+            [(hash-has-key? used-map (car p2)) (loop (add1 pos)
+                                                     (cdr src-new-tour)
+                                                     (append dest-new-tour (list (car src-new-tour))) 
+                                                     (cdr p1)
+                                                     (cdr p2)
+                                                     used-map)]
+            [else (begin (display (car p2)) (newline)
+                         (loop (add1 pos)
+                               (cdr src-new-tour)
+                               (append dest-new-tour (list (car p2)))
+                               (cdr p1)
+                               (cdr p2)
+                               (hash-set used-map (car p2) #t)))]))
+    (begin (display "phase2")(newline)
+           (loop 0 new-tour '() p1 p2 used-map)))
+
+
+  (define (phase3-2 p1 p2 new-tour used-map)
+    (define (loop unused new-tour acc)
+      (cond [(null? new-tour) acc]
+            [(null? (car new-tour)) 
+             (loop (cdr unused) (cdr new-tour) (append acc (list (car unused))))]
+            [else (loop unused       (cdr new-tour) (append acc (list (car new-tour))))]))
+    (display (get-unused p2 used-map))
+    (loop (get-unused p2 used-map) new-tour '()))
+
   (let* ([r1           (random strlen)]       ; Create two random points for crossover
          [r2           (random strlen)]
          [point-a      (if (> r1 r2) r2 r1)]  ; Get the min point for corssover
@@ -85,68 +75,15 @@
          [new-tour     '()]
          [post-phase1  (phase1 p1 p2 point-a point-b new-tour used-map)]
          [post-phase2  (phase2 p1 p2 point-a point-b (car post-phase1) (cadr post-phase1))]
-         [post-phase3  (phase3 p1 p2 (car post-phase2) (cadr post-phase2))])
+         [post-phase3  (phase3-2 p1 p2 (car post-phase2) (cadr post-phase2))])
     (begin
-      (display "Parent 1: ") (display p1) (newline)
-      (display "Parent 2: ") (display p2) (newline)
-      (display "Points  : ") (display (list point-a point-b)) (newline)
+      ;(display "Parent 1: ") (display p1) (newline)
+      ;(display "Parent 2: ") (display p2) (newline)
+      ;(display "Points  : ") (display (list point-a point-b)) (newline)
+      ;(display "Post p1 : ") (display (car post-phase1)) (newline)
+      ;(display "Post p2 : ") (display (car post-phase2)) (newline)
+      ;(display "Child   : ") (display post-phase3) (newline)
       post-phase3)))
-
-;; two of
-;(define (crossover-partially-mapped p1 p2 strlen) 
-;
-;  (define (phase1 a b new-tour1 new-tour2 used1-map used2-map)
-;    (define (loop pos new-tour1 new-tour2 p1 p2 used1-map used2-map)
-;      (cond [(null? p1) (list new-tour1 new-tour2 used1-map used2-map)]
-;            [(null? p2) (list new-tour1 new-tour2 used1-map used2-map)]
-;            [(> pos b)  (list new-tour1 new-tour2 used1-map used2-map)]
-;            [(< pos a)  (loop (add1 pos) 
-;                              (cons null new-tour1) 
-;                              (cons null new-tour2) 
-;                              (cdr p1) 
-;                              (cdr p2)
-;                              used1-map
-;                              used2-map)]
-;            [else (loop (add1 pos)
-;                        (append new-tour1 (list (car p1)))
-;                        (append new-tour2 (list (car p2)))
-;                        (cdr p1)
-;                        (cdr p2)
-;                        (hash-set used1-map (car p1) #t)
-;                        (hash-set used2-map (car p2) #t))]))
-;    (loop 0 new-tour1 new-tour2 p1 p2 used1-map used2-map))
-;
-;  (define (phase2 a b new-tour1 new-tour2 used1-map used2-map)
-;    (define (loop pos src-new-tour1 dest-new-tour1 src-new-tour2 dest-new-tour2 p1 p2 used1-map used2-map)
-;      (cond [(null? p1) (list new-tour1 new-tour2 used1-map used2-map)]
-;            [(null? p2) (list new-tour1 new-tour2 used1-map used2-map)]
-;            [(and (<= pos b) (>= pos a)) (loop (add1 pos) 
-;                                               (cdr src-new-tour1)
-;                                               (append dest-new-tour1 (list (car src-new-tour1)))
-;                                               (cdr src-new-tour2)
-;                                               (append dest-new-tour2 (list (car src-new-tour2)))
-;                                               (cdr p1)
-;                                               (cdr p2)
-;                                               used1-map
-;                                               used2-map)]
-;      )
-;    ))
-;
-;  (let* ([r1           (random strlen)]       ; Create two random points for crossover
-;         [r2           (random strlen)]
-;         [point-a      (if (> r1 r2) r2 r1)]  ; Get the min point for corssover
-;         [point-b      (if (> r1 r2) r1 r2)]  ; Get the max point for crossover
-;         [used1-map     #hash()]       ; Store used cities here to avoid linear lookup
-;         [used2-map     #hash()]       ; Store used cities here to avoid linear lookup
-;         [new-tour1    '()]
-;         [new-tour2    '()])
-;
-;    (begin (display (list point-a point-b)) (newline)
-;
-;    (phase1 point-a point-b new-tour1 new-tour2 used1-map used2-map))))
-
-;(define r (crossover-partially-mapped '(1 2 3 4 5 6 7 8 9 10) '(10 9 8 7 6 5 4 3 2 1) 10))
-;(display "C1  : ") (display r) (newline)
 
 (define (crossover-injection p1 p2)      null)
 (define (crossover-order p1 p2)          null)
@@ -162,10 +99,10 @@
 
 ;; selection-tournament : ( Number -> Real -> (Listof '( Number '( Number Number ))) )
 (define (selection-tournament tsize bprob fpop)
-  (let* ([tpop (take (shuffle fpop) tsize)])       ; Select the individuals for tournament
+  (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
     (if (chance bprob)
-      (first (sort tpop (lambda (x y) (< (car x) (car y)))))
-      (first (shuffle tpop)))))
+      (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
+      (first (shuffle tpop)))))                                ; Otherwise take a random one
 
 ;; (: get-coords-from-file ( String String Number -> (Listof (Listof Number)) ))
 (define (get-coords-from-file filename sep [start-ind 0])
@@ -190,6 +127,8 @@
 ;; TODO change to command line arg
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
 
+;(define (tsp-crossover )
+;  (let ([p1 (selection-tournament )])))
 
 
 
@@ -201,21 +140,18 @@
 (define population
   (initialize-population (create-random-tour coords) 0 10))
 
-(newline) (newline)
+;(for ([c (map cons (map calc-fitness population) population)])
+;     (display (car c)) (newline))
 
-(for ([c (map cons (map calc-fitness population) population)])
-     (display (car c)) (newline))
+(define p1 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
+(define p2 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
 
-(newline) (newline)
+(crossover-partially-mapped (list 1 2 3 4 5 6 7 8 9) (list 9 8 7 6 5 4 3 2 1) 9)
 
-(for ([c (map cons (map calc-fitness population) population)])
-     (display (car c)) (newline))
+;p1 (newline)
+;p2 (newline)
+;(crossover-partially-mapped p1 p2 (length p1))
 
-
-(selection-tournament 10 0.65 (zip (map calc-fitness population) population))
-
-;(define (tsp-crossover )
-;  (let ([p1 (selection-tournament )])))
 ;
 ;; Drawing utils
 ;; :  ( (Listof (Listof Number)) -> Number )
