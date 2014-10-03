@@ -9,10 +9,17 @@
 ;; Utils
 (define (fpop->pop  fpop) (map cdr fpop))
 (define (fpop->fits fpop) (map car fpop))
+(define (get-unused l used) (filter (lambda (x) (not (hash-has-key? used x))) l))
+(define (get-coords-from-file filename sep [start-ind 0])
+  (let* ([lines      (file->lines filename)]
+         [tokens     (map    (lambda (x) (string-split x sep))        lines)]
+         [ntokens    (filter (lambda (x) (not (null? x)))             tokens)]
+         [str-coords (map    (lambda (x) (take (drop x start-ind) 2)) ntokens)]
+         [num-coords (map    (lambda (x) (map string->number x))      str-coords)])
+    num-coords))
 (define (line-distance p1 p2)
   (sqrt (sqr (+ (- (car  p1) (car  p2))
                 (- (cadr p1) (cadr p2))))))
-(define (get-unused l used) (filter (lambda (x) (not (hash-has-key? used x))) l))
 ;; End utils
 
 (define (crossover-partially-mapped p1 p2 strlen) 
@@ -22,40 +29,27 @@
             [(null? p2) (list new-tour used-map)]
             [(> pos b)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
             [(< pos a)  (loop (add1 pos) (append new-tour (list null)) (cdr p1) (cdr p2) used-map)]
-            [else (loop (add1 pos)
-                        (append new-tour (list (car p1)))
-                        (cdr p1)
-                        (cdr p2)
-                        (hash-set used-map (car p1) #t))]))
+            [else (loop (add1 pos) (append new-tour (list (car p1)))
+                        (cdr p1) (cdr p2) (hash-set used-map (car p1) #t))]))
     (loop 0 new-tour p1 p2 used-map))
 
 
-  ;; Crossover helperfn
   (define (phase2 p1 p2 a b new-tour used-map)
-    (define (loop pos src-new-tour dest-new-tour p1 p2 used-map)
-      (cond [(null? p1) (list dest-new-tour used-map)]
-            [(null? p2) (list dest-new-tour used-map)]
-            [(and (<= pos b) (>= pos a)) (loop (add1 pos)
-                                               (cdr src-new-tour)
-                                               (append dest-new-tour (list (car src-new-tour))) 
-                                               (cdr p1)
-                                               (cdr p2)
+    (define (loop pos src dest p1 p2 used-map)
+      (cond [(null? p1) (list dest used-map)]
+            [(null? p2) (list dest used-map)]
+            [(and (<= pos b) (>= pos a)) 
+             (loop (add1 pos) (cdr src) (append dest (list (car src))) 
+                                               (cdr p1) (cdr p2)
                                                used-map)]
-            [(hash-has-key? used-map (car p2)) (loop (add1 pos)
-                                                     (cdr src-new-tour)
-                                                     (append dest-new-tour (list (car src-new-tour))) 
-                                                     (cdr p1)
-                                                     (cdr p2)
+            [(hash-has-key? used-map (car p2)) (loop (add1 pos) (cdr src)
+                                                     (append dest (list (car src))) 
+                                                     (cdr p1) (cdr p2)
                                                      used-map)]
-            [else (begin (display (car p2)) (newline)
-                         (loop (add1 pos)
-                               (cdr src-new-tour)
-                               (append dest-new-tour (list (car p2)))
-                               (cdr p1)
-                               (cdr p2)
-                               (hash-set used-map (car p2) #t)))]))
-    (begin (display "phase2")(newline)
-           (loop 0 new-tour '() p1 p2 used-map)))
+            [else (loop (add1 pos) (cdr src) 
+                        (append dest (list (car p2))) (cdr p1) (cdr p2) 
+                        (hash-set used-map (car p2) #t))]))
+    (loop 0 new-tour '() p1 p2 used-map))
 
 
   (define (phase3-2 p1 p2 new-tour used-map)
@@ -63,8 +57,7 @@
       (cond [(null? new-tour) acc]
             [(null? (car new-tour)) 
              (loop (cdr unused) (cdr new-tour) (append acc (list (car unused))))]
-            [else (loop unused       (cdr new-tour) (append acc (list (car new-tour))))]))
-    (display (get-unused p2 used-map))
+            [else (loop unused  (cdr new-tour) (append acc (list (car new-tour))))]))
     (loop (get-unused p2 used-map) new-tour '()))
 
   (let* ([r1           (random strlen)]       ; Create two random points for crossover
@@ -104,14 +97,6 @@
       (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
       (first (shuffle tpop)))))                                ; Otherwise take a random one
 
-;; (: get-coords-from-file ( String String Number -> (Listof (Listof Number)) ))
-(define (get-coords-from-file filename sep [start-ind 0])
-  (let* ([lines      (file->lines filename)]
-         [tokens     (map    (lambda (x) (string-split x sep))        lines)]
-         [ntokens    (filter (lambda (x) (not (null? x)))             tokens)]
-         [str-coords (map    (lambda (x) (take (drop x start-ind) 2)) ntokens)]
-         [num-coords (map    (lambda (x) (map string->number x))      str-coords)])
-    num-coords))
 
 (define (calc-fitness individual)
   (let ([outside (line-distance (car individual) (car (reverse individual)))]
@@ -127,36 +112,43 @@
 ;; TODO change to command line arg
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
 
-;(define (tsp-crossover )
-;  (let ([p1 (selection-tournament )])))
+(define (tsp-crossover tsize bprob fpop strlen)
+  (let ([p1 (selection-tournament tsize bprob fpop)]
+        [p2 (selection-tournament tsize bprob fpop)])
+    (crossover-partially-mapped (cdr p1) (cdr p2) strlen)))
+
+(define (create-new-pop fpop tsize bprob popsize strlen)
+;  (display "INNEWPOP")(newline)
+;  (display "fpop")(display fpop)(newline)
+;  (display "tsize")(display tsize)(newline)
+;  (display "bprob")(display bprob)(newline)
+;  (display "popsize")(display popsize)(newline)
+;  (display "strlen")(display strlen)(newline)
+  (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
 
 
 
 
 
+;(create-new-pop population 200)
 
 
-
-(define population
-  (initialize-population (create-random-tour coords) 0 10))
 
 ;(for ([c (map cons (map calc-fitness population) population)])
 ;     (display (car c)) (newline))
 
-(define p1 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
-(define p2 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
-
-(crossover-partially-mapped (list 1 2 3 4 5 6 7 8 9) (list 9 8 7 6 5 4 3 2 1) 9)
+;(define p1 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
+;
+;(crossover-partially-mapped (list 1 2 3 4 5 6 7 8 9) (list 9 8 7 6 5 4 3 2 1) 9)
 
 ;p1 (newline)
 ;p2 (newline)
 ;(crossover-partially-mapped p1 p2 (length p1))
 
-;
 ;; Drawing utils
 ;; :  ( (Listof (Listof Number)) -> Number )
-(define (get-min-x coords) (car (argmin car  coords)))
-(define (get-max-x coords) (car (argmax car  coords)))
+(define (get-min-x coords) (car  (argmin car  coords)))
+(define (get-max-x coords) (car  (argmax car  coords)))
 (define (get-min-y coords) (cadr (argmin cadr coords)))
 (define (get-max-y coords) (cadr (argmax cadr coords)))
 
@@ -165,14 +157,58 @@
 (define xmax (get-max-x coords))
 (define ymin (get-min-y coords))
 (define ymax (get-max-y coords))
-;; DRAWING ;;
 
+(define population (initialize-population (create-random-tour coords) 0 200))
+(define strlen (length (car population)))
+;(display "pop")
+;(display population)
+;(newline)
+;(newline)
+;(let* ([fits (map calc-fitness population)]
+;       [fpop (zip fits population)]
+;       [best (argmax car fpop)])
+;  (display "fits")
+;  (display fits)
+;  (newline)
+;  (newline)
+;  (display "fpop")
+;  (display fpop)
+;  (newline)
+;  (newline)
+;  (display "best")
+;  (display best)
+;  (newline)
+;  (newline)
+;  (define newpop (create-new-pop fpop 2 0.65 2 strlen))
+;  (display "newpop")
+;  (display newpop)
+;  (newline)
+;  (newline)
+;  (display "newfits")
+;  (define fits2 (map calc-fitness newpop))
+;  (display fits2)
+;  (newline)
+;  (newline)
+;  (display "newfpop")
+;  (define fpop2 (zip fits2 newpop))
+;  (display fpop2)
+;  (newline)
+;  (newline)
+;  (display "newbest2")
+;  (define best2 (argmax car fpop2))
+;  (display best2)
+;  (newline)
+;  (newline))
 
-;; Display points
-;(start-gui)
-;(define (loop coords)
-;  (let ((t (current-milliseconds)))
-;    (update-tour-view (world coords xmin xmax ymin ymax))
-;    (sleep 1/25)
-;    (loop (shuffle coords))))
-;(loop coords)
+(define (loop oldpop)
+  (let* ([fits (map calc-fitness oldpop)]
+         [fpop (zip fits oldpop)]
+         [best (argmin car fpop)])
+    (display (car best)) (newline)
+    (update-tour-view (world (cdr best) xmin xmax ymin ymax))
+    (loop (append (cdr (create-new-pop fpop 2 0.65 200 strlen)) (list (cdr best))))))
+
+;(map calc-fitness (create-new-pop (zip (map calc-fitness population) population) 2 0.65 200 strlen))
+
+(start-gui)
+(loop population)
