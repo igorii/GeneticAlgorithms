@@ -13,9 +13,8 @@
     (if (null? x) 
       (begin (display acc) (newline))
       (if (= curr cross-point)
-        (begin
-          (let ([final (append acc (list #\_) x)])
-            (display final) (newline)))
+        (let ([final (append acc (list #\_) x)])
+          (display final) (newline))
         (loop (cdr x) (add1 curr) (append acc (list (car x)))))))
   (loop chromosome 0 '()))
 
@@ -130,13 +129,12 @@
     (let* ([fits        (map fitness-fn pop)]   ; Assess each individual
            [zipfits     (zip fits pop)]         ; Pair individuals with population
            [curr-best   (argmax car zipfits)])  ; Find the best in the current population
-      (begin (display curr-best) (newline)
-             ;   If best is good enough, return it
-             (if (>= (car curr-best) cutoff)
-               curr-best  ;; returns a pair of (fitness . individual)
-               (if use-elitism
-                 (master-loop (elitism (cdr curr-best) (create-next-gen selection-type pop fits popsize strlen)))
-                 (master-loop (create-next-gen selection-type pop fits popsize strlen)))))))
+      (display curr-best) (newline)
+      (if (>= (car curr-best) cutoff)    ; If best is good enough, return it
+        curr-best                        ; returns a pair of (fitness . individual)
+        (if use-elitism
+          (master-loop (elitism (cdr curr-best) (create-next-gen selection-type pop fits popsize strlen)))
+          (master-loop (create-next-gen selection-type pop fits popsize strlen))))))
 
 
   ; Initialize population of individuals

@@ -27,3 +27,4 @@
            #:cutoff            ((simple-max-fitness 10) (list 10 10 10 10 10 1 1 1 1 1))
            #:use-elitism       #t
            #:fitness-eval      (simple-max-fitness 10))
+
