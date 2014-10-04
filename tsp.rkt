@@ -18,8 +18,8 @@
          [num-coords (map    (lambda (x) (map string->number x))      str-coords)])
     num-coords))
 (define (line-distance p1 p2)
-  (sqrt (sqr (+ (- (car  p1) (car  p2))
-                (- (cadr p1) (cadr p2))))))
+  (sqrt (+ (sqr (- (car  p1) (car  p2)))
+           (sqr (- (cadr p1) (cadr p2))))))
 ;; End utils
 
 (define (crossover-partially-mapped p1 p2 strlen) 
@@ -113,9 +113,10 @@
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
 
 (define (tsp-crossover tsize bprob fpop strlen)
-  (let ([p1 (selection-tournament tsize bprob fpop)]
-        [p2 (selection-tournament tsize bprob fpop)])
-    (crossover-partially-mapped (cdr p1) (cdr p2) strlen)))
+  (let* ([p1 (selection-tournament tsize bprob fpop)]
+         [p2 (selection-tournament tsize bprob fpop)]
+         [candidate (crossover-partially-mapped (cdr p1) (cdr p2) strlen)])
+    (mutation-inversion candidate strlen)))
 
 (define (create-new-pop fpop tsize bprob popsize strlen)
 ;  (display "INNEWPOP")(newline)
@@ -125,6 +126,17 @@
 ;  (display "popsize")(display popsize)(newline)
 ;  (display "strlen")(display strlen)(newline)
   (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
+
+
+(define (mutation-inversion individual strlen)
+  (let* ([r1 (random strlen)]
+         [r2 (random strlen)]
+         [a  (if (< r1 r2) r1 r2)]
+         [b  (if (< r1 r2) r2 r1)]
+         [start (take individual a)]
+         [middle (take (drop individual a) (- b a))]
+         [end    (drop individual (+ a (- b a)))])
+    (append start (reverse middle) end)))
 
 
 
@@ -158,57 +170,16 @@
 (define ymin (get-min-y coords))
 (define ymax (get-max-y coords))
 
-(define population (initialize-population (create-random-tour coords) 0 200))
+(define popsize 200)
+(define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
-;(display "pop")
-;(display population)
-;(newline)
-;(newline)
-;(let* ([fits (map calc-fitness population)]
-;       [fpop (zip fits population)]
-;       [best (argmax car fpop)])
-;  (display "fits")
-;  (display fits)
-;  (newline)
-;  (newline)
-;  (display "fpop")
-;  (display fpop)
-;  (newline)
-;  (newline)
-;  (display "best")
-;  (display best)
-;  (newline)
-;  (newline)
-;  (define newpop (create-new-pop fpop 2 0.65 2 strlen))
-;  (display "newpop")
-;  (display newpop)
-;  (newline)
-;  (newline)
-;  (display "newfits")
-;  (define fits2 (map calc-fitness newpop))
-;  (display fits2)
-;  (newline)
-;  (newline)
-;  (display "newfpop")
-;  (define fpop2 (zip fits2 newpop))
-;  (display fpop2)
-;  (newline)
-;  (newline)
-;  (display "newbest2")
-;  (define best2 (argmax car fpop2))
-;  (display best2)
-;  (newline)
-;  (newline))
-
 (define (loop oldpop)
   (let* ([fits (map calc-fitness oldpop)]
          [fpop (zip fits oldpop)]
          [best (argmin car fpop)])
-    (display (car best)) (newline)
     (update-tour-view (world (cdr best) xmin xmax ymin ymax))
-    (loop (append (cdr (create-new-pop fpop 2 0.65 200 strlen)) (list (cdr best))))))
-
-;(map calc-fitness (create-new-pop (zip (map calc-fitness population) population) 2 0.65 200 strlen))
+    (display (car best)) (newline)
+    (loop (append (cdr (create-new-pop fpop 20 0.65 popsize strlen)) (list (cdr best))))))
 
 (start-gui)
 (loop population)
