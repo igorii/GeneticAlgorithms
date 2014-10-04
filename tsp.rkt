@@ -40,8 +40,8 @@
             [(null? p2) (list dest used-map)]
             [(and (<= pos b) (>= pos a)) 
              (loop (add1 pos) (cdr src) (append dest (list (car src))) 
-                                               (cdr p1) (cdr p2)
-                                               used-map)]
+                   (cdr p1) (cdr p2)
+                   used-map)]
             [(hash-has-key? used-map (car p2)) (loop (add1 pos) (cdr src)
                                                      (append dest (list (car src))) 
                                                      (cdr p1) (cdr p2)
@@ -80,7 +80,6 @@
 
 (define (crossover-injection p1 p2)      null)
 (define (crossover-order p1 p2)          null)
-(define (crossover-position-based p1 p2) null)
 
 ;; two mutation operators
 (define (mutation-1 individual) null)
@@ -97,6 +96,10 @@
       (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
       (first (shuffle tpop)))))                                ; Otherwise take a random one
 
+(define (fill-nulls with l acc)
+  (cond [(null? l) acc]
+        [(null? (car l)) (fill-nulls (cdr with) (cdr l) (append acc (list (car with))))]
+        [else (fill-nulls with (cdr l) (append acc (list (car l))))]))
 
 (define (calc-fitness individual)
   (let ([outside (line-distance (car individual) (car (reverse individual)))]
@@ -115,47 +118,81 @@
 (define (tsp-crossover tsize bprob fpop strlen)
   (let* ([p1 (selection-tournament tsize bprob fpop)]
          [p2 (selection-tournament tsize bprob fpop)]
-         [candidate (crossover-partially-mapped (cdr p1) (cdr p2) strlen)])
-    (mutation-inversion candidate strlen)))
+         [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
+    ((random-mutation) candidate strlen)))
 
 (define (create-new-pop fpop tsize bprob popsize strlen)
-;  (display "INNEWPOP")(newline)
-;  (display "fpop")(display fpop)(newline)
-;  (display "tsize")(display tsize)(newline)
-;  (display "bprob")(display bprob)(newline)
-;  (display "popsize")(display popsize)(newline)
-;  (display "strlen")(display strlen)(newline)
   (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
 
-
 (define (mutation-inversion individual strlen)
-  (let* ([r1 (random strlen)]
-         [r2 (random strlen)]
-         [a  (if (< r1 r2) r1 r2)]
-         [b  (if (< r1 r2) r2 r1)]
-         [start (take individual a)]
+  (let* ([r1     (random strlen)]
+         [r2     (random strlen)]
+         [a      (if (< r1 r2) r1 r2)]
+         [b      (if (< r1 r2) r2 r1)]
+         [start  (take individual a)]
          [middle (take (drop individual a) (- b a))]
          [end    (drop individual (+ a (- b a)))])
     (append start (reverse middle) end)))
 
 
+(define (mutation-exchange individual strlen)
+  (let* ([v (list->vector individual)]
+         [a (random strlen)]
+         [b (random strlen)]
+         [c (vector-ref v a)])
+    (vector-set! v a (vector-ref v b))
+    (vector-set! v b c)
+    (vector->list v)))
+
+
+(define (random-mutation)
+  (let* ([ms (vector mutation-exchange mutation-inversion mutation-scramble)]
+  ;(let* ([ms (vector mutation-exchange mutation-inversion)]
+         [r (random (vector-length ms))])
+    (vector-ref ms r)))
+
+(define (random-crossover)
+  (let* ([cs (vector crossover-position-based crossover-partially-mapped)]
+         [r (random (vector-length cs))])
+    (vector-ref cs r)))
+
+
+;(define (crossover-partially-mapped p1 p2 strlen) 
+(define (crossover-position-based p1 p2 strlen)
+  (define (get-from-p1 p1 acc used)
+    (cond [(null? p1) (list acc used)]
+          [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
+          [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
+  (let* ([post-p1 (get-from-p1 p1 '() #hash())]
+         [unused (get-unused p2 (cadr post-p1))])
+    (fill-nulls unused (car post-p1) '())))
 
 
 
-;(create-new-pop population 200)
+(define (mutation-scramble individual strlen)
+  (let* ([r1 (random strlen)]
+         [r2 (random strlen)]
+         [a  (if (< r1 r2) r1 r2)]
+         [b  (if (< r1 r2) r2 r1)]
+         [start (take individual a)]
+         [mid   (take (drop individual a) (- b a))]
+         [end   (drop individual (+ a (- b a)))])
+    (append start (shuffle mid) end)))
 
 
 
-;(for ([c (map cons (map calc-fitness population) population)])
-;     (display (car c)) (newline))
 
-;(define p1 (selection-tournament 10 0.65 (zip (map calc-fitness population) population)))
-;
-;(crossover-partially-mapped (list 1 2 3 4 5 6 7 8 9) (list 9 8 7 6 5 4 3 2 1) 9)
 
-;p1 (newline)
-;p2 (newline)
-;(crossover-partially-mapped p1 p2 (length p1))
+
+
+
+(define (mutation-displacement individual strlen)
+  ;; Select a random subtour (between points and and b)
+  ;; Select a random insertion point not in subtour
+  ;; Move the subtour to within the insertion point
+  null)
+
+
 
 ;; Drawing utils
 ;; :  ( (Listof (Listof Number)) -> Number )
@@ -170,7 +207,7 @@
 (define ymin (get-min-y coords))
 (define ymax (get-max-y coords))
 
-(define popsize 200)
+(define popsize 150)
 (define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
 (define (loop oldpop)
@@ -179,7 +216,8 @@
          [best (argmin car fpop)])
     (update-tour-view (world (cdr best) xmin xmax ymin ymax))
     (display (car best)) (newline)
-    (loop (append (cdr (create-new-pop fpop 20 0.65 popsize strlen)) (list (cdr best))))))
+    ;(loop (create-new-pop fpop 20 0.65 popsize strlen))))
+    (loop (append (cdr (create-new-pop fpop 15 0.50 popsize strlen)) (list (cdr best))))))
 
 (start-gui)
 (loop population)

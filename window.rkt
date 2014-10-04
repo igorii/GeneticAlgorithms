@@ -40,7 +40,7 @@
   (send dc set-pen no-pen)
   (send dc set-brush red-brush)
   (for ([p ps])
-       (send dc draw-ellipse (car p) (cadr p) 4 4)))
+       (send dc draw-ellipse (- (car p) 2) (- (cadr p) 2) 4 4)))
 
 ;; Canvas draw
 (define (draw-world canvas ps)
