@@ -29,13 +29,9 @@
            (sqr (- (cadr p1) (cadr p2))))))
 
 
-(define (crossover-injection p1 p2)      null)
-(define (crossover-order p1 p2)          null)
-
-;; two mutation operators
-(define (mutation-1 individual) null)
-(define (mutation-2 individual) null)
-
+;; *******
+;; Fitness
+;; *******
 
 (define (calc-fitness individual)
   (let ([outside (line-distance (car individual) (car (reverse individual)))]
@@ -44,12 +40,6 @@
                        (list (car individual) 0)
                        (cdr individual))])
     (+ outside (cadr inside))))        ; Add the internal tour and the first and last point
-
-(define (create-random-tour domain)
-  (lambda (_) (shuffle domain)))
-
-(define (create-new-pop fpop tsize bprob popsize strlen)
-  (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
 
 ;; **********
 ;; Crossovers
@@ -66,6 +56,10 @@
          [p2 (select tsize bprob fpop)]
          [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
     ((random-mutation) candidate strlen)))
+
+(define (crossover-injection p1 p2)      null)
+
+(define (crossover-order p1 p2)          null)
 
 (define (crossover-partially-mapped p1 p2 strlen) 
   (define (phase1 p1 p2 a b tour used-map)
@@ -123,6 +117,7 @@
     (vector-ref ss r)))
 
 (define (selection-ranked pop)   null)
+
 (define (selection-roulette pop) null)
 
 (define (selection-tournament tsize bprob fpop)
@@ -183,6 +178,13 @@
 ;; **************
 ;; Initialization
 ;; **************
+
+(define (create-random-tour domain)
+  (lambda (_) (shuffle domain)))
+
+(define (create-new-pop fpop tsize bprob popsize strlen)
+  (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
+
 
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
 (define popsize 120)
