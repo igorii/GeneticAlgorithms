@@ -5,8 +5,8 @@
 (require racket/gui/base)
 (require (planet williams/animated-canvas/animated-canvas))
 
-(define *width* 800)
-(define *height* 800)
+(define *width* 400)
+(define *height* 400)
 
 (define frame (new frame% 
                    [label "Travelling Salesperson"]
