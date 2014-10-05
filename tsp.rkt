@@ -9,7 +9,9 @@
 ;; *****
 ;; Utils
 ;; *****
-
+(define (insert-at lst pos x)
+  (define-values (before after) (split-at lst pos))
+  (append before (cons x after)))
 (define (fpop->pop  fpop) (map cdr fpop))
 (define (fpop->fits fpop) (map car fpop))
 (define (get-unused l used) (filter (lambda (x) (not (hash-has-key? used x))) l))
@@ -51,15 +53,14 @@
     (vector-ref cs r)))
 
 (define (tsp-crossover tsize bprob fpop strlen)
-  (let* ([select (random-selection)]
-         [p1 (select tsize bprob fpop)]
-         [p2 (select tsize bprob fpop)]
+  (let* ([select (random-selection tsize bprob)]
+         [p1 (select fpop)]
+         [p2 (select fpop)]
          [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
     ((random-mutation) candidate strlen)))
 
-(define (crossover-injection p1 p2)      null)
-
-(define (crossover-order p1 p2)          null)
+(define (crossover-injection p1 p2) null)
+(define (crossover-order p1 p2) null)
 
 (define (crossover-partially-mapped p1 p2 strlen) 
   (define (phase1 p1 p2 a b tour used-map)
@@ -111,20 +112,28 @@
 ;; Selections
 ;; **********
 
-(define (random-selection)
-  (let* ([ss (vector selection-tournament)]
-         [r (random (vector-length ss))])
+(define (random-selection tsize bprob)
+  (let* ([ss (vector (selection-tournament tsize bprob))]
+         [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
-(define (selection-ranked pop)   null)
+(define (selection-ranked pop) null)
 
-(define (selection-roulette pop) null)
+(define (selection-roulette fpop)
+  (define (total-fitness fs) (foldl + 0 fs))
+  (define (loop wp partial-sum pop fs)
+    (let ([next-fitness (+ partial-sum (car fs))])
+      (cond [(null? (cdr fs))    (car pop)]
+            [(> next-fitness wp) (car pop)]
+            [else                (loop wp next-fitness (cdr pop) (cdr fs))])))
+  (loop (* (random) (total-fitness (map car fpop))) 0 (map cdr fpop) (map car fpop)))
 
-(define (selection-tournament tsize bprob fpop)
-  (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
-    (if (chance bprob)
-      (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
-      (first (shuffle tpop)))))                                ; Otherwise take a random one
+(define (selection-tournament tsize bprob)
+  (lambda (fpop)
+    (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
+      (if (chance bprob)
+        (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
+        (first (shuffle tpop))))))                                ; Otherwise take a random one
 
 ;; *********
 ;; Mutations
@@ -132,11 +141,9 @@
 
 (define (random-mutation)
   ;(let* ([ms (vector mutation-exchange mutation-inversion mutation-scramble)]
-  (let* ([ms (vector mutation-exchange mutation-inversion)]
+  (let* ([ms (vector mutation-exchange mutation-inversion mutation-insertion)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
-
-(define (mutation-insertion) null)
 
 (define (mutation-displaced-inversion) null)
 
@@ -169,6 +176,13 @@
     (vector-set! v b c)
     (vector->list v)))
 
+(define (mutation-insertion individual strlen)
+  (let* ([a (random strlen)]
+         [b (random strlen)]
+         [remd (append (take individual a) (drop individual (add1 a)))]
+         [v (car (drop individual a))])
+    (insert-at remd b v)))
+
 (define (mutation-displacement individual strlen)
   ;; Select a random subtour (between points and and b)
   ;; Select a random insertion point not in subtour
@@ -185,26 +199,30 @@
 (define (create-new-pop fpop tsize bprob popsize strlen)
   (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
 
-
+(define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
 (define popsize 120)
 (define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
 (define (loop oldpop)
-  (let* ([fits (map calc-fitness oldpop)]
-         [fpop (zip fits oldpop)]
-         [best (argmin car fpop)])
+  (let* ([fits  (map calc-fitness oldpop)]
+         [fpop  (zip fits oldpop)]
+         [best  (argmin car fpop)]
+         [worst (argmax car fpop)])
     (update-tour-view (world (cdr best) xmin xmax ymin ymax))
-    (display (car best)) (newline)
+    (display "Best: ") (display (car best))
+    (display "    \tWorst: ") (display (car worst))
+    (display "    \tDiff: ") (display (- (car worst) (car best))) 
+    (newline)
     (loop (append (cdr (create-new-pop fpop 20 0.65 popsize strlen)) (list (cdr best))))))
 
 ;; *******
 ;; Drawing
 ;; *******
-(define xmin (car  (argmin car  coords)))
-(define xmax (car  (argmax car  coords)))
-(define ymin (cadr (argmin cadr coords)))
-(define ymax (cadr (argmax cadr coords)))
+(define xmin (car  (argmin car  (car population))))
+(define xmax (car  (argmax car  (car population))))
+(define ymin (cadr (argmin cadr (car population))))
+(define ymax (cadr (argmax cadr (car population))))
 
 ;; *****
 ;; Start
