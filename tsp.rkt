@@ -9,6 +9,7 @@
 ;; *****
 ;; Utils
 ;; *****
+
 (define (insert-at lst pos x)
   (define-values (before after) (split-at lst pos))
   (append before (cons x after)))
@@ -29,8 +30,9 @@
 (define (line-distance p1 p2)
   (sqrt (+ (sqr (- (car  p1) (car  p2)))
            (sqr (- (cadr p1) (cadr p2))))))
-
-
+(define (scan f val list)
+  (if (null? list) '()
+    (cons (f val (car list)) (scan f (f val (car list)) (cdr list)))))
 ;; *******
 ;; Fitness
 ;; *******
@@ -52,8 +54,8 @@
          [r (random (vector-length cs))])
     (vector-ref cs r)))
 
-(define (tsp-crossover tsize bprob fpop strlen)
-  (let* ([select (random-selection tsize bprob)]
+(define (tsp-crossover tsize bprob fpop nbest strlen popsize)
+  (let* ([select (random-selection tsize bprob nbest popsize)]
          [p1 (select fpop)]
          [p2 (select fpop)]
          [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
@@ -112,13 +114,29 @@
 ;; Selections
 ;; **********
 
-(define (random-selection tsize bprob)
-  (let* ([ss (vector (selection-tournament tsize bprob))]
+(define (random-selection tsize bprob ranked-base popsize)
+  (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
+  ;(let* ([ss (vector (selection-tournament tsize bprob))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
-(define (selection-ranked pop) null)
+(define (selection-ranked base u)
 
+  (define (select r probs fpop last)
+    (if (> r (car probs)) last
+      (select r (cdr probs) (cdr fpop) (car fpop))))
+
+  (lambda (fpop) 
+    (let* ([sorted (sort fpop (λ (a b) (< (car a) (car b))))]
+           [probs  (map (λ (x) (+ (/ (- 2 base) u)
+                                  (/ (* (- base 1) (* 2 x)) (* u (- u 1)))))
+                        (range 1 (add1 u)))]
+           [sprobs (scan + 0 probs)]
+           [r      (random)])
+      ;(display (foldl + 0 probs)) (newline)
+      (select r probs sorted (car sorted)))))
+
+;; Wrong
 (define (selection-roulette fpop)
   (define (total-fitness fs) (foldl + 0 fs))
   (define (loop wp partial-sum pop fs)
@@ -196,8 +214,8 @@
 (define (create-random-tour domain)
   (lambda (_) (shuffle domain)))
 
-(define (create-new-pop fpop tsize bprob popsize strlen)
-  (map (lambda (_) (tsp-crossover tsize bprob fpop strlen)) (range 0 popsize)))
+(define (create-new-pop fpop tsize bprob nbest popsize strlen)
+  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize)) (range 0 popsize)))
 
 (define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
@@ -214,7 +232,7 @@
     (display "    \tWorst: ") (display (car worst))
     (display "    \tDiff: ") (display (- (car worst) (car best))) 
     (newline)
-    (loop (append (cdr (create-new-pop fpop 20 0.65 popsize strlen)) (list (cdr best))))))
+    (loop (append (cdr (create-new-pop fpop 20 0.65 10 popsize strlen)) (list (cdr best))))))
 
 ;; *******
 ;; Drawing
