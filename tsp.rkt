@@ -115,8 +115,8 @@
 ;; **********
 
 (define (random-selection tsize bprob ranked-base popsize)
+  ;(let* ([ss (vector (selection-ranked ranked-base popsize))]
   (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
-  ;(let* ([ss (vector (selection-tournament tsize bprob))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
@@ -136,16 +136,6 @@
       ;(display (foldl + 0 probs)) (newline)
       (select r probs sorted (car sorted)))))
 
-;; Wrong
-(define (selection-roulette fpop)
-  (define (total-fitness fs) (foldl + 0 fs))
-  (define (loop wp partial-sum pop fs)
-    (let ([next-fitness (+ partial-sum (car fs))])
-      (cond [(null? (cdr fs))    (car pop)]
-            [(> next-fitness wp) (car pop)]
-            [else                (loop wp next-fitness (cdr pop) (cdr fs))])))
-  (loop (* (random) (total-fitness (map car fpop))) 0 (map cdr fpop) (map car fpop)))
-
 (define (selection-tournament tsize bprob)
   (lambda (fpop)
     (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
@@ -158,8 +148,7 @@
 ;; *********
 
 (define (random-mutation)
-  ;(let* ([ms (vector mutation-exchange mutation-inversion mutation-scramble)]
-  (let* ([ms (vector mutation-exchange mutation-inversion mutation-insertion)]
+  (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
 
@@ -219,7 +208,7 @@
 
 (define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define coords (get-coords-from-file "berlin52.txt" " " 1))
-(define popsize 120)
+(define popsize 160)
 (define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
 (define (loop oldpop)
@@ -232,7 +221,7 @@
     (display "    \tWorst: ") (display (car worst))
     (display "    \tDiff: ") (display (- (car worst) (car best))) 
     (newline)
-    (loop (append (cdr (create-new-pop fpop 20 0.65 10 popsize strlen)) (list (cdr best))))))
+    (loop (append (cdr (create-new-pop fpop 20 0.65 15 popsize strlen)) (list (cdr best))))))
 
 ;; *******
 ;; Drawing
