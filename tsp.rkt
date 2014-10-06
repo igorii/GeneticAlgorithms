@@ -1,7 +1,6 @@
 #lang racket
 
-(require 2htdp/image)
-(require 2htdp/universe)
+(require racket/gui)
 (require "util.rkt"
          "general-ga.rkt"
          "window.rkt")
@@ -115,7 +114,6 @@
 ;; **********
 
 (define (random-selection tsize bprob ranked-base popsize)
-  ;(let* ([ss (vector (selection-ranked ranked-base popsize))]
   (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
@@ -148,11 +146,13 @@
 ;; *********
 
 (define (random-mutation)
-  (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
+  (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion)]
+  ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
 
 (define (mutation-displaced-inversion) null)
+(define (mutation-displacement individual strlen) null)
 
 (define (mutation-inversion individual strlen)
   (let* ([r1     (random strlen)]
@@ -190,12 +190,6 @@
          [v (car (drop individual a))])
     (insert-at remd b v)))
 
-(define (mutation-displacement individual strlen)
-  ;; Select a random subtour (between points and and b)
-  ;; Select a random insertion point not in subtour
-  ;; Move the subtour to within the insertion point
-  null)
-
 ;; **************
 ;; Initialization
 ;; **************
@@ -206,22 +200,36 @@
 (define (create-new-pop fpop tsize bprob nbest popsize strlen)
   (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize)) (range 0 popsize)))
 
+;; ************
+;; Command Line
+;; ************
+
+(struct args (file sep col) #:transparent)
+(define cargs 
+  (command-line
+    #:args (file sep col)
+    (args file sep (string->number col))))
+
+(display cargs)
 (define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
-(define coords (get-coords-from-file "berlin52.txt" " " 1))
-(define popsize 160)
+(define coords (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
+;(define coords (get-coords-from-file "berlin52.txt" " " 1))
+(define popsize 150)
 (define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
-(define (loop oldpop)
+
+(define (loop name render oldpop)
   (let* ([fits  (map calc-fitness oldpop)]
          [fpop  (zip fits oldpop)]
          [best  (argmin car fpop)]
          [worst (argmax car fpop)])
-    (update-tour-view (world (cdr best) xmin xmax ymin ymax))
-    (display "Best: ") (display (car best))
-    (display "    \tWorst: ") (display (car worst))
-    (display "    \tDiff: ") (display (- (car worst) (car best))) 
+    (if render (update-tour-view (world (cdr best) xmin xmax ymin ymax)) null)
+    (display name)
+    (display " \tBest:  ") (display (car best))
+    (display " \tWorst: ") (display (car worst))
+    (display " \tDiff:  ") (display (- (car worst) (car best))) 
     (newline)
-    (loop (append (cdr (create-new-pop fpop 20 0.65 15 popsize strlen)) (list (cdr best))))))
+    (loop name render (append (cdr (create-new-pop fpop 20 0.65 10 popsize strlen)) (list (cdr best))))))
 
 ;; *******
 ;; Drawing
@@ -236,4 +244,6 @@
 ;; *****
 
 (start-gui)
-(loop population)
+
+(define main-island (thread (lambda () (loop "main" #t population))))
+;(define sub-island  (thread (lambda () (loop "sub"  #f population))))
