@@ -117,7 +117,8 @@
 ;; **********
 
 (define (random-selection tsize bprob ranked-base popsize)
-  (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
+  ;(let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
+  (let* ([ss (vector (selection-ranked ranked-base popsize))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
@@ -140,7 +141,7 @@
                         (range 1 (add1 u)))]
            [sprobs (scan + 0 probs)]
            [r      (random)])
-      ;(display (foldl + 0 probs)) (newline)
+      (display (foldl + 0 probs)) (display "        ") (display (car (reverse sprobs)))(newline)
       (select r probs sorted (car sorted)))))
 
 ;; *********
@@ -261,3 +262,4 @@
 ;; *****
 
 (start-gui)
+(new-run)
