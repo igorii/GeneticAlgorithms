@@ -5,6 +5,9 @@
          "general-ga.rkt"
          "window.rkt")
 
+(struct settings (restart pause mutation crossover) #:transparent)
+(define *settings* (settings #f #t "Random" "Random"))
+
 ;; *****
 ;; Utils
 ;; *****
@@ -79,7 +82,7 @@
             [(and (<= pos b) (>= pos a)) 
              (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
             [(hash-has-key? used-map (car p2)) 
-                 (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
+             (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
             [else (loop (add1 pos) (cdr src) 
                         (append dest (list (car p2))) (cdr p1) (cdr p2) 
                         (hash-set used-map (car p2) #t))]))
@@ -123,7 +126,7 @@
   (lambda (fpop) 
     (let* ([sorted (sort fpop (λ (a b) (< (car a) (car b))))]
            [probs  (map (λ (x) (+ (/ (- 2 base) u)
-                                  (/ (* (- base 1) (* 2 x)) (* u (- u 1)))))
+                                 (/ (* (- base 1) (* 2 x)) (* u (- u 1)))))
                         (range 1 (add1 u)))]
            [sprobs (scan + 0 probs)]
            [r      (random)])
@@ -143,7 +146,7 @@
 
 (define (random-mutation)
   (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion)]
-  ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
+         ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
 
@@ -206,35 +209,58 @@
     #:args (file sep col)
     (args file sep (string->number col))))
 
-(display cargs)
 (define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define coords (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
-;(define coords (get-coords-from-file "berlin52.txt" " " 1))
 (define popsize 100)
-(define population (initialize-population (create-random-tour coords) 0 popsize))
-(define strlen (length (car population)))
 
-(define (loop name render oldpop)
-  (let* ([fits  (map calc-fitness oldpop)]
-         [fpop  (zip fits oldpop)]
-         [best  (argmin car fpop)])
-    ;     [worst (argmax car fpop)])
-    ;(if render (update-tour-view (world (cdr best) xmin xmax ymin ymax)) null)
-    (update-tour-view (world (cdr best) xmin xmax ymin ymax))
-    (display name)
-    (display " \tBest:  ") (display (car best))
-    ;(display " \tWorst: ") (display (car worst))
-    ;(display " \tDiff:  ") (display (- (car worst) (car best))) 
-    (newline)
-    (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))))))
+;; Set up the GUI callbacks
+(define top-row-panel    (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
+(define middle-row-panel (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
+
+;; callbacks
+
+(define pause-btn-cb        (lambda (b e) null))
+(define restart-btn-cb      (lambda (b e) null))
+(define mutation-choice-cb  (lambda (c e) null))
+(define crossover-choice-cb (lambda (c e) null))
+
+(define pause-btn (new button% [parent top-row-panel]
+                       [label "Play/Pause"]
+                       [callback (lambda (button event) 
+                                   (if (not (thread? *ga-thread*))
+                                     (new-run)
+                                     (set! *settings* (struct-copy settings *settings* [pause (not (settings-pause *settings*))]))))]))
+
+(define restart-btn (new button% [parent top-row-panel]
+                         [label "Restart"]
+                         [callback (lambda (button event) (new-run))]))
+
+(define mutation-choice (new choice% [parent middle-row-panel]
+                             [label "Mutation"]
+                             [choices (list "Random" "Insertion" "Inversion" "Exchange" "Scramble")]
+                             [callback (lambda (choice event) 1)]))
+;(display (send choice get-string-selection)) (newline))])
+
+(define crossover-choice (new choice% [parent middle-row-panel]
+                              [label "Crossover"]
+                              [choices (list "Random" "Ranked" "Tournament")]
+                              [callback (lambda (choice event) 1)]))
+;(display (send choice get-string-selection)) (newline))])
+
+
+(define (loop name render oldpop strlen w)
+  (if (settings-pause *settings*) 
+    (loop name render oldpop strlen w)
+    (let* ([fits  (map calc-fitness oldpop)]
+           [fpop  (zip fits oldpop)]
+           [best  (argmin car fpop)])
+      (update-tour-view (number->string (car best)) (struct-copy world w [points (cdr best)]))
+      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) strlen w))))
 
 ;; *******
 ;; Drawing
 ;; *******
-(define xmin (car  (argmin car  (car population))))
-(define xmax (car  (argmax car  (car population))))
-(define ymin (cadr (argmin cadr (car population))))
-(define ymax (cadr (argmax cadr (car population))))
+
 
 ;; *****
 ;; Start
@@ -242,5 +268,18 @@
 
 (start-gui)
 
-;(define main-island (thread (lambda () (loop "main" #t population))))
+;(define ga-thread (thread (lambda () (loop "main" #t population))))
+(define *ga-thread* null)
+
+(define (new-run)
+  (let* ([population (initialize-population (create-random-tour coords) 0 popsize)]
+         [xmin   (car  (argmin car  (car population)))]
+         [xmax   (car  (argmax car  (car population)))]
+         [ymin   (cadr (argmin cadr (car population)))]
+         [ymax   (cadr (argmax cadr (car population)))]
+         [strlen (length (car population))])
+    (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
+    (set! *settings* (struct-copy settings *settings* [pause #f]))
+    (set! *ga-thread* (thread (lambda () (loop "main" #t population strlen (world null xmin xmax ymin ymax)))))))
+
 ;(define sub-island  (thread (lambda () (loop "sub"  #f population))))
