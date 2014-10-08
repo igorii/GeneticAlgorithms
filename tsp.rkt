@@ -33,29 +33,12 @@
 ;; Utils
 ;; *****
 
-(define (insert-at lst pos x)
-  (define-values (before after) (split-at lst pos))
-  (append before (cons x after)))
 (define (fpop->pop  fpop) (map cdr fpop))
 (define (fpop->fits fpop) (map car fpop))
 (define (get-unused l used) (filter (lambda (x) (not (hash-has-key? used x))) l))
-(define (fill-nulls with l acc)
-  (cond [(null? l) acc]
-        [(null? (car l)) (fill-nulls (cdr with) (cdr l) (append acc (list (car with))))]
-        [else (fill-nulls with (cdr l) (append acc (list (car l))))]))
-(define (get-coords-from-file filename sep [start-ind 0])
-  (let* ([lines      (file->lines filename)]
-         [tokens     (map    (lambda (x) (string-split x sep))        lines)]
-         [ntokens    (filter (lambda (x) (not (null? x)))             tokens)]
-         [str-coords (map    (lambda (x) (take (drop x start-ind) 2)) ntokens)]
-         [num-coords (map    (lambda (x) (map string->number x))      str-coords)])
-    num-coords))
 (define (line-distance p1 p2)
   (sqrt (+ (sqr (- (car  p1) (car  p2)))
            (sqr (- (cadr p1) (cadr p2))))))
-(define (scan f val list)
-  (if (null? list) '()
-    (cons (f val (car list)) (scan f (f val (car list)) (cdr list)))))
 
 ;; *******
 ;; Fitness
@@ -250,7 +233,7 @@
 ;(display (send choice get-string-selection)) (newline))])
 
 (define (new-run)
-  (let* ([population (initialize-population (create-random-tour coords) 0 popsize)]
+  (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
          [xmin   (car  (argmin car  (car population)))]
          [xmax   (car  (argmax car  (car population)))]
          [ymin   (cadr (argmin cadr (car population)))]
@@ -258,20 +241,20 @@
          [strlen (length (car population))])
     (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
     (set! *settings* (struct-copy settings *settings* [pause #f]))
-    (set! *ga-thread* (thread (lambda () (loop "main" #t population strlen (world null xmin xmax ymin ymax)))))))
+    (set! *ga-thread* (thread (lambda () (loop "main" #t population *popsize* strlen (world null xmin xmax ymin ymax)))))))
 
 ;; *******
 ;; Drawing
 ;; *******
 
-(define (loop name render oldpop strlen w)
+(define (loop name render oldpop popsize strlen w)
   (if (settings-pause *settings*) 
-    (loop name render oldpop strlen w)
+    (loop name render oldpop popsize strlen w)
     (let* ([fits  (map calc-fitness oldpop)]
            [fpop  (zip fits oldpop)]
            [best  (argmin car fpop)])
       (update-tour-view (number->string (car best)) (struct-copy world w [points (cdr best)]))
-      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) strlen w))))
+      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) popsize strlen w))))
 
 ;; *****
 ;; Start
