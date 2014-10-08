@@ -6,7 +6,7 @@
 (require racket/gui/base)
 (require (planet williams/animated-canvas/animated-canvas))
 
-(struct world    (points xmin xmax ymin ymax))
+(struct world (points xmin xmax ymin ymax))
 
 (define *width* 400)
 (define *height* 400)
@@ -36,7 +36,7 @@
 (define black-brush (make-object brush% "BLACK"   'solid))
 (define red-brush   (make-object brush% "RED"     'solid))
 
-(define (draw-tour ps) ; left side of the lambda
+(define (draw-tour ps)
   (let ([p     (new dc-path%)]
         [first (car ps)]
         [rest  (cdr ps)])
