@@ -11,17 +11,47 @@
 (define frame (new frame% 
                    [label "Travelling Salesperson"]
                    [width *width*]
-                   [height *height*]))
+                   [height (+ 100 *height*)]))
+
+
+
+(define pause #f)
+
+;; ****************
+;; Add GUI elements
+;; ****************
 
 (define canvas (instantiate animated-canvas% (frame)
                             [style '(border)]
                             [min-width *width*] 
                             [min-height *height*]))
 
+(define top-row-panel    (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
+(define middle-row-panel (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
+
+
+(new button% [parent top-row-panel]
+             [label "Play/Pause"]
+             [callback (lambda (button event) (set! pause (not pause)))])
+
+(new button% [parent top-row-panel]
+             [label "Restart"]
+             [callback (lambda (button event) (set! pause (not pause)))])
+
+(new choice% [parent middle-row-panel]
+             [label "Mutation"]
+             [choices (list "Random" "Insertion" "Inversion" "Exchange" "Scramble")]
+             [callback (lambda (choice event) (display (send choice get-string-selection)) (newline))])
+
+(new choice% [parent middle-row-panel]
+             [label "Crossover"]
+             [choices (list "Random" "Ranked" "Tournament")]
+             [callback (lambda (choice event) (display (send choice get-string-selection)) (newline))])
+
+
 ;; Pens and brushes
 (define no-pen      (make-object pen%   "BLACK" 1 'transparent))
 (define black-pen   (make-object pen%   "BLACK" 1 'solid))
-
 (define no-brush    (make-object brush% "BLACK"   'transparent))
 (define black-brush (make-object brush% "BLACK"   'solid))
 (define red-brush   (make-object brush% "RED"     'solid))
@@ -63,27 +93,6 @@
            [yinter (/ ynumer yrange)])
       (list (* dxrange xinter) (- dyrange (* dyrange yinter))))))
 
-
-;(define (update-canvas-tour ps)
-;  (let ([ps2 ()]))
-;  (draw-world canvas ps))
-
-
-;(define (loop ps)
-;  (let ((t (current-milliseconds)))
-;    (draw-world canvas ps)
-;    (sleep/yield (max 0.0 (/ (- 10.0 (- (current-milliseconds) t)) 1000.0)))
-;    (loop ps)))
-;
-;(loop points)
-;(define (loop ps)
-;  (let ((t (current-milliseconds)))
-;    (draw-world canvas ps)
-;    (sleep/yield (max 0.0 (/ (- 10.0 (- (current-milliseconds) t)) 1000.0)))
-;    (loop ps)))
-;
-;(loop points)
-
 (define (project-points w width height)
   (map (coord->point
          (world-xmin w)
@@ -97,7 +106,8 @@
 (struct world (points xmin xmax ymin ymax))
 
 (define (update-tour-view world) 
-  (draw-world canvas (project-points world *width* *height*)))
+  (if pause null
+  (draw-world canvas (project-points world *width* *height*))))
 
 (define (start-gui)
   (send frame show #t))

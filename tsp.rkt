@@ -32,6 +32,7 @@
 (define (scan f val list)
   (if (null? list) '()
     (cons (f val (car list)) (scan f (f val (car list)) (cdr list)))))
+
 ;; *******
 ;; Fitness
 ;; *******
@@ -55,8 +56,8 @@
 
 (define (tsp-crossover tsize bprob fpop nbest strlen popsize)
   (let* ([select (random-selection tsize bprob nbest popsize)]
-         [p1 (select fpop)]
-         [p2 (select fpop)]
+         [p1        (select fpop)]
+         [p2        (select fpop)]
          [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
     ((random-mutation) candidate strlen)))
 
@@ -69,21 +70,16 @@
       (cond [(null? p1) (list tour used-map)]
             [(> pos b)  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
             [(< pos a)  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
-            [else (loop (add1 pos) (append tour (list (car p1)))
-                        (cdr p1) (cdr p2) (hash-set used-map (car p1) #t))]))
+            [else       (loop (add1 pos) (append tour (list (car p1))) (cdr p1) (cdr p2) (hash-set used-map (car p1) #t))]))
     (loop 0 tour p1 p2 used-map))
 
   (define (phase2 p1 p2 a b tour used-map)
     (define (loop pos src dest p1 p2 used-map)
       (cond [(null? p1) (list dest used-map)]
             [(and (<= pos b) (>= pos a)) 
-             (loop (add1 pos) (cdr src) (append dest (list (car src))) 
-                   (cdr p1) (cdr p2)
-                   used-map)]
-            [(hash-has-key? used-map (car p2)) (loop (add1 pos) (cdr src)
-                                                     (append dest (list (car src))) 
-                                                     (cdr p1) (cdr p2)
-                                                     used-map)]
+             (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
+            [(hash-has-key? used-map (car p2)) 
+                 (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
             [else (loop (add1 pos) (cdr src) 
                         (append dest (list (car p2))) (cdr p1) (cdr p2) 
                         (hash-set used-map (car p2) #t))]))
@@ -139,7 +135,7 @@
     (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
       (if (chance bprob)
         (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
-        (first (shuffle tpop))))))                                ; Otherwise take a random one
+        (first (shuffle tpop))))))                               ; Otherwise take a random one
 
 ;; *********
 ;; Mutations
@@ -214,22 +210,23 @@
 (define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define coords (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 ;(define coords (get-coords-from-file "berlin52.txt" " " 1))
-(define popsize 150)
+(define popsize 100)
 (define population (initialize-population (create-random-tour coords) 0 popsize))
 (define strlen (length (car population)))
 
 (define (loop name render oldpop)
   (let* ([fits  (map calc-fitness oldpop)]
          [fpop  (zip fits oldpop)]
-         [best  (argmin car fpop)]
-         [worst (argmax car fpop)])
-    (if render (update-tour-view (world (cdr best) xmin xmax ymin ymax)) null)
+         [best  (argmin car fpop)])
+    ;     [worst (argmax car fpop)])
+    ;(if render (update-tour-view (world (cdr best) xmin xmax ymin ymax)) null)
+    (update-tour-view (world (cdr best) xmin xmax ymin ymax))
     (display name)
     (display " \tBest:  ") (display (car best))
-    (display " \tWorst: ") (display (car worst))
-    (display " \tDiff:  ") (display (- (car worst) (car best))) 
+    ;(display " \tWorst: ") (display (car worst))
+    ;(display " \tDiff:  ") (display (- (car worst) (car best))) 
     (newline)
-    (loop name render (append (cdr (create-new-pop fpop 20 0.65 10 popsize strlen)) (list (cdr best))))))
+    (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))))))
 
 ;; *******
 ;; Drawing
@@ -245,5 +242,5 @@
 
 (start-gui)
 
-(define main-island (thread (lambda () (loop "main" #t population))))
+;(define main-island (thread (lambda () (loop "main" #t population))))
 ;(define sub-island  (thread (lambda () (loop "sub"  #f population))))
