@@ -5,8 +5,29 @@
          "general-ga.rkt"
          "window.rkt")
 
+;; **********
+;; Structures
+;; **********
+
+(struct args     (file sep col) #:transparent)
 (struct settings (restart pause mutation crossover) #:transparent)
+
+;; ************
+;; Command Line
+;; ************
+
+(define cargs (command-line #:args (file sep col)
+    (args file sep (string->number col))))
+
+;; *************
+;; Global params
+;; *************
+
 (define *settings* (settings #f #t "Random" "Random"))
+(define *ga-thread* null)
+(define *popsize* 100)
+(define *rcoords* (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
+(define *coords* (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 
 ;; *****
 ;; Utils
@@ -64,6 +85,15 @@
          [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
     ((random-mutation) candidate strlen)))
 
+(define (crossover-position-based p1 p2 strlen)
+  (define (get-from-p1 p1 acc used)
+    (cond [(null? p1) (list acc used)]
+          [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
+          [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
+  (let* ([post-p1 (get-from-p1 p1 '() #hash())]
+         [unused (get-unused p2 (cadr post-p1))])
+    (fill-nulls unused (car post-p1) '())))
+
 (define (crossover-injection p1 p2) null)
 (define (crossover-order p1 p2) null)
 
@@ -99,15 +129,6 @@
          [post-phase3  (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
     post-phase3))
 
-(define (crossover-position-based p1 p2 strlen)
-  (define (get-from-p1 p1 acc used)
-    (cond [(null? p1) (list acc used)]
-          [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
-          [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
-  (let* ([post-p1 (get-from-p1 p1 '() #hash())]
-         [unused (get-unused p2 (cadr post-p1))])
-    (fill-nulls unused (car post-p1) '())))
-
 ;; **********
 ;; Selections
 ;; **********
@@ -117,8 +138,14 @@
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
-(define (selection-ranked base u)
+(define (selection-tournament tsize bprob)
+  (lambda (fpop)
+    (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
+      (if (chance bprob)
+        (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
+        (first (shuffle tpop))))))                               ; Otherwise take a random one
 
+(define (selection-ranked base u)
   (define (select r probs fpop last)
     (if (> r (car probs)) last
       (select r (cdr probs) (cdr fpop) (car fpop))))
@@ -132,13 +159,6 @@
            [r      (random)])
       ;(display (foldl + 0 probs)) (newline)
       (select r probs sorted (car sorted)))))
-
-(define (selection-tournament tsize bprob)
-  (lambda (fpop)
-    (let* ([tpop (take (shuffle fpop) tsize)])                   ; Select the individuals for tournament
-      (if (chance bprob)
-        (first (sort tpop (lambda (x y) (< (car x) (car y)))))   ; bprob % of the time take the best
-        (first (shuffle tpop))))))                               ; Otherwise take a random one
 
 ;; *********
 ;; Mutations
@@ -199,30 +219,12 @@
 (define (create-new-pop fpop tsize bprob nbest popsize strlen)
   (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize)) (range 0 popsize)))
 
-;; ************
-;; Command Line
-;; ************
+;; ***
+;; GUI
+;; ***
 
-(struct args (file sep col) #:transparent)
-(define cargs 
-  (command-line
-    #:args (file sep col)
-    (args file sep (string->number col))))
-
-(define rcoords (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
-(define coords (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
-(define popsize 100)
-
-;; Set up the GUI callbacks
 (define top-row-panel    (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
 (define middle-row-panel (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
-
-;; callbacks
-
-(define pause-btn-cb        (lambda (b e) null))
-(define restart-btn-cb      (lambda (b e) null))
-(define mutation-choice-cb  (lambda (c e) null))
-(define crossover-choice-cb (lambda (c e) null))
 
 (define pause-btn (new button% [parent top-row-panel]
                        [label "Play/Pause"]
@@ -247,30 +249,6 @@
                               [callback (lambda (choice event) 1)]))
 ;(display (send choice get-string-selection)) (newline))])
 
-
-(define (loop name render oldpop strlen w)
-  (if (settings-pause *settings*) 
-    (loop name render oldpop strlen w)
-    (let* ([fits  (map calc-fitness oldpop)]
-           [fpop  (zip fits oldpop)]
-           [best  (argmin car fpop)])
-      (update-tour-view (number->string (car best)) (struct-copy world w [points (cdr best)]))
-      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) strlen w))))
-
-;; *******
-;; Drawing
-;; *******
-
-
-;; *****
-;; Start
-;; *****
-
-(start-gui)
-
-;(define ga-thread (thread (lambda () (loop "main" #t population))))
-(define *ga-thread* null)
-
 (define (new-run)
   (let* ([population (initialize-population (create-random-tour coords) 0 popsize)]
          [xmin   (car  (argmin car  (car population)))]
@@ -282,4 +260,21 @@
     (set! *settings* (struct-copy settings *settings* [pause #f]))
     (set! *ga-thread* (thread (lambda () (loop "main" #t population strlen (world null xmin xmax ymin ymax)))))))
 
-;(define sub-island  (thread (lambda () (loop "sub"  #f population))))
+;; *******
+;; Drawing
+;; *******
+
+(define (loop name render oldpop strlen w)
+  (if (settings-pause *settings*) 
+    (loop name render oldpop strlen w)
+    (let* ([fits  (map calc-fitness oldpop)]
+           [fpop  (zip fits oldpop)]
+           [best  (argmin car fpop)])
+      (update-tour-view (number->string (car best)) (struct-copy world w [points (cdr best)]))
+      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) strlen w))))
+
+;; *****
+;; Start
+;; *****
+
+(start-gui)
