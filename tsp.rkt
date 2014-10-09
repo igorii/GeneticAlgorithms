@@ -10,24 +10,43 @@
 ;; **********
 
 (struct args     (file sep col) #:transparent)
-(struct settings (restart pause mutation crossover) #:transparent)
+(struct settings (restart pause mutation crossover selection) #:transparent)
 
 ;; ************
 ;; Command Line
 ;; ************
 
 (define cargs (command-line #:args (file sep col)
-    (args file sep (string->number col))))
+                            (args file sep (string->number col))))
 
 ;; *************
 ;; Global params
 ;; *************
 
-(define *settings* (settings #f #t "Random" "Random"))
-(define *ga-thread* null)
-(define *popsize* 100)
-(define *rcoords* (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
-(define *coords* (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
+;; Settings for the current run. This is updated by the GUI layer with the desired choices
+(define *settings*          (settings #f #t "Random" "Random" "Random"))
+
+;; A handle to the thread responsible for looping and rendering the genetic algorithm
+(define *ga-thread*         null)
+
+;; The population size used in the genetic algorithm
+(define *popsize*           100)
+
+;; The tournament size used in tournement selection
+(define *tournament-size*   15)
+
+;; The probability that the best individual will be chosen in *tournament selection*
+(define *prob-best*         0.65)
+
+;; The expected number of children that the best individual will create when using *ranked selection*
+(define *num-best-children* 2)
+
+;; The probability that a given child will be mutated when created
+(define *mutation-rate*     (/ 1 *popsize*))
+
+;; Coordinate system identifiers for a random tour and the Berlin52 problem
+(define *rcoords*           (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
+(define *coords*            (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 
 ;; *****
 ;; Utils
@@ -56,18 +75,28 @@
 ;; Crossovers
 ;; **********
 
+(define (lbl->crossover-fn lbl)
+  (cond [(eq? lbl "Random")           (random-crossover)]
+        [(eq? lbl "Position Based")   crossover-position-based]
+        [(eq? lbl "Partially Mapped") crossover-partially-mapped]))
+
 (define (random-crossover)
   (let* ([cs (vector crossover-position-based crossover-partially-mapped)]
          [r (random (vector-length cs))])
     (vector-ref cs r)))
 
-(define (tsp-crossover tsize bprob fpop nbest strlen popsize)
+(define (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate)
   (let* ([select (random-selection tsize bprob nbest popsize)]
          [p1        (select fpop)]
          [p2        (select fpop)]
-         [candidate ((random-crossover) (cdr p1) (cdr p2) strlen)])
-    ((random-mutation) candidate strlen)))
+         [cfn       (lbl->crossover-fn (settings-crossover *settings*))]
+         [mfn       (lbl->mutation-fn (settings-mutation *settings*))]
+         [candidate (cfn (cdr p1) (cdr p2) strlen)])
+    (if (chance mutation-rate)
+      (mfn candidate strlen)
+      candidate)))
 
+;; TODO - generate second child
 (define (crossover-position-based p1 p2 strlen)
   (define (get-from-p1 p1 acc used)
     (cond [(null? p1) (list acc used)]
@@ -80,6 +109,7 @@
 (define (crossover-injection p1 p2) null)
 (define (crossover-order p1 p2) null)
 
+;; TODO - generate second child
 (define (crossover-partially-mapped p1 p2 strlen) 
   (define (phase1 p1 p2 a b tour used-map)
     (define (loop pos tour p1 p2 used-map)
@@ -117,8 +147,9 @@
 ;; **********
 
 (define (random-selection tsize bprob ranked-base popsize)
-  ;(let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
-  (let* ([ss (vector (selection-ranked ranked-base popsize))]
+  (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
+  ;(let* ([ss (vector (selection-ranked ranked-base popsize))]
+  ;(let* ([ss (vector (selection-tournament tsize bprob))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
@@ -130,27 +161,63 @@
         (first (shuffle tpop))))))                               ; Otherwise take a random one
 
 (define (selection-ranked base u)
-  (define (select r probs fpop last)
-    (if (> r (car probs)) last
-      (select r (cdr probs) (cdr fpop) (car fpop))))
+  (define (select r probs fpop)
+    (if (< r (car probs))
+      (car fpop)
+      (select r (cdr probs) (cdr fpop))))
 
-  (lambda (fpop) 
-    (let* ([sorted (sort fpop (λ (a b) (< (car a) (car b))))]
-           [probs  (map (λ (x) (+ (/ (- 2 base) u)
-                                 (/ (* (- base 1) (* 2 x)) (* u (- u 1)))))
-                        (range 1 (add1 u)))]
-           [sprobs (scan + 0 probs)]
-           [r      (random)])
-      (display (foldl + 0 probs)) (display "        ") (display (car (reverse sprobs)))(newline)
-      (select r probs sorted (car sorted)))))
+  ;; Assign a probability based on the following:
+  ;;     @see slide 25 - howgaswork1.pdf
+  ;;
+  ;;         (2 - s)     2i(s - 1)
+  ;; P(i) =  -------  +  ---------,  from 0 to (u - 1)
+  ;;            u        u(u - 1)
+  ;;
+  (define (assign i)
+    (+ (/ (- 2 base) u)
+       (/ (* (- base 1) (* 2 i)) (* u (- u 1)))))
+
+  ;; Assigns a probability based on the following:
+  ;;
+  ;;          2*i
+  ;; P(i) = --------
+  ;;        u(u + 1)
+  ;;
+  (define (assign2 i)
+    (/ (* 2 i)
+       (* u (add1 u))))
+
+  ;; Assign a probability based on the function given in the assignment description:
+  ;; P(i) = p^r
+  (define (assign3 i)
+    (expt 0.5 i))
+
+  (lambda (fpop)
+    (let* ([sorted (sort fpop (λ (a b) (< (car a) (car b))))]   ; Sort the population
+           ;; Reverse the probabilities since we are minimizng the scores
+           [probs  (map assign3 (reverse (range 1 (add1 u))))]  ; Assign rank based probabilities
+           [sprobs (scan + 0 probs)]                            ; Scan addition over the probabilities
+           [r      (random)])                                   ; Choose a random individual
+      ;(display sprobs) (newline)
+      (select r sprobs sorted))))                               ; Determine which individual was chosen
+
+;((selection-ranked 2 3) (list (list 1 1) (list 5 1) (list 4 1)))
 
 ;; *********
 ;; Mutations
 ;; *********
 
+(define (lbl->mutation-fn lbl)
+  (cond [(eq? lbl "Random") (random-mutation)]
+        [(eq? lbl "Inversion") mutation-inversion]
+        [(eq? lbl "Scramble")  mutation-scramble]
+        [(eq? lbl "Insertion") mutation-insertion]
+        [(eq? lbl "Exchange")  mutation-exchange]))
+
 (define (random-mutation)
-  (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion)]
-         ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
+  ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion)]
+  (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
+  ;(let* ([ms (vector mutation-insertion mutation-exchange)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
 
@@ -200,15 +267,17 @@
 (define (create-random-tour domain)
   (lambda (_) (shuffle domain)))
 
-(define (create-new-pop fpop tsize bprob nbest popsize strlen)
-  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize)) (range 0 popsize)))
+(define (create-new-pop fpop tsize bprob nbest popsize strlen mutation-rate)
+  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate)) 
+       (range 0 popsize)))
 
 ;; ***
 ;; GUI
 ;; ***
 
-(define top-row-panel    (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
-(define middle-row-panel (new horizontal-panel% [parent frame] [alignment (list 'center 'center)]))
+(define option-panel     (new horizontal-panel% [parent frame]))
+(define middle-row-panel (new vertical-panel% [parent option-panel]))
+(define top-row-panel    (new vertical-panel% [parent option-panel] [alignment (list 'center 'center)]))
 
 (define pause-btn (new button% [parent top-row-panel]
                        [label "Play/Pause"]
@@ -224,15 +293,22 @@
 (define mutation-choice (new choice% [parent middle-row-panel]
                              [label "Mutation"]
                              [choices (list "Random" "Insertion" "Inversion" "Exchange" "Scramble")]
-                             [callback (lambda (choice event) 1)]))
-;(display (send choice get-string-selection)) (newline))])
+                             [callback (lambda (choice event) 
+                                         (set! *settings* (struct-copy settings *settings* [mutation (send choice get-string-selection)])))]))
+
+(define selection-choice (new choice% [parent middle-row-panel]
+                              [label "Selection"]
+                              [choices (list "Random" "Ranked" "Tournament")]
+                              [callback (lambda (choice event)
+                                         (set! *settings* (struct-copy settings *settings* [selection (send choice get-string-selection)])))]))
 
 (define crossover-choice (new choice% [parent middle-row-panel]
                               [label "Crossover"]
-                              [choices (list "Random" "Ranked" "Tournament")]
-                              [callback (lambda (choice event) 1)]))
-;(display (send choice get-string-selection)) (newline))])
+                              [choices (list "Random" "Position Based" "Partially Mapped")]
+                              [callback (lambda (choice event)
+                                         (set! *settings* (struct-copy settings *settings* [crossover (send choice get-string-selection)])))]))
 
+(define *i* 0)
 (define (new-run)
   (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
          [xmin   (car  (argmin car  (car population)))]
@@ -241,21 +317,33 @@
          [ymax   (cadr (argmax cadr (car population)))]
          [strlen (length (car population))])
     (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
+    (set! *i* 0)
     (set! *settings* (struct-copy settings *settings* [pause #f]))
-    (set! *ga-thread* (thread (lambda () (loop "main" #t population *popsize* strlen (world null xmin xmax ymin ymax)))))))
+    (set! *ga-thread* (thread (lambda () (loop (send crossover-choice get-string-selection)
+                                               (send mutation-choice get-string-selection)
+                                               population *popsize* strlen (world null xmin xmax ymin ymax) *mutation-rate*))))))
+;(display (send choice get-string-selection)) (newline))])
+
+(define (string->crossover lbl)
+  (cond [(eq? lbl "Random") null]
+        [(eq? lbl "Partially Mapped") null]))
 
 ;; *******
 ;; Drawing
 ;; *******
 
-(define (loop name render oldpop popsize strlen w)
+(define (loop crossover mutation oldpop popsize strlen w mutation-rate)
   (if (settings-pause *settings*) 
-    (loop name render oldpop popsize strlen w)
+    (loop crossover mutation oldpop popsize strlen w mutation-rate)
     (let* ([fits  (map calc-fitness oldpop)]
            [fpop  (zip fits oldpop)]
-           [best  (argmin car fpop)])
-      (update-tour-view (number->string (car best)) (struct-copy world w [points (cdr best)]))
-      (loop name render (append (cdr (create-new-pop fpop 7 0.65 8 popsize strlen)) (list (cdr best))) popsize strlen w))))
+           [best  (argmin car fpop)]
+           [worst (argmax car fpop)])
+      (set! *i* (add1 *i*))
+      (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
+      (loop crossover mutation 
+            (append (cdr (create-new-pop fpop *tournament-size* *prob-best* *num-best-children* popsize strlen mutation-rate)) (list (cdr best))) 
+            popsize strlen w mutation-rate))))
 
 ;; *****
 ;; Start

@@ -51,13 +51,18 @@
   (for ([p ps])
        (send dc draw-ellipse (- (car p) 2) (- (cadr p) 2) 4 4)))
 
-(define (draw-world canvas score ps)
+(define (draw-world canvas i best-score worst-score ps)
   (let [(dc (send canvas get-dc))]
+    (send dc erase)
+    (send dc set-alpha 1)
     (draw-points ps dc)
     (send dc set-pen black-pen)
     (send dc set-brush no-brush)
     (send dc draw-path (draw-tour ps))
-    (send dc draw-text score 0 0))
+    (send dc set-alpha 0.5)
+    (send dc draw-text best-score 0 0)
+    (send dc draw-text worst-score 0 20)
+    (send dc draw-text i 0 40))
   (send canvas swap-bitmaps))
 
 (define (coord->point xmin ymin xrange yrange dxrange dyrange)
@@ -80,7 +85,7 @@
          height)
        (world-points w)))
 
-(define (update-tour-view score world) 
-  (draw-world canvas score (project-points world *width* *height*)))
+(define (update-tour-view i best-score worst-score world) 
+  (draw-world canvas i best-score worst-score (project-points world *width* *height*)))
 
 (define (start-gui) (send frame show #t))
