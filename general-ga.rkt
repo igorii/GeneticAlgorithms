@@ -8,6 +8,7 @@
          print-with-cross-point)
 
 ;; (: print-with-cross-point ( Chromosome Number -> IO () ))
+;; Print a list with an extra marker element marking the given position
 (define (print-with-cross-point chromosome cross-point)
   (define (loop x curr acc)
     (if (null? x) 
@@ -57,9 +58,7 @@
         (let ([next (if (op curr cross-point) (car p1) (car p2))])
           (loop (cdr p1) (cdr p2) (add1 curr) (append acc (list next))))))
     (loop parent1 parent2 0 '()))
-
-  ;; Create the two children
-  (list (get-child <= cross-point parent1 parent2)
+  (list (get-child <= cross-point parent1 parent2)   ; Create the two children
         (get-child >  cross-point parent1 parent2)))
 
 ;; (: selection-roulette ( (Listof Chromosome) (Listof Number) -> (Listof Chromosome) ))
@@ -85,6 +84,7 @@
 
 
 
+
 ;; Generic GA
 (define (run-ga #:string-length     strlen
                 #:population-size   popsize
@@ -98,45 +98,42 @@
                 #:fitness-eval      fitness-fn)
 
 
+  ;; Create the next generation
   (define (create-next-gen selection-type last-gen fits popsize strlen)
     (define (loop i acc)
-      (if (= i 0)
-        acc
-        ;   Pick p1 with replacement
+      (if (= i 0) acc
         (let* ([selection-fn (get-selection-fn selection-type)]
-               [parent1     (selection-roulette last-gen fits)]
-               ;   Pick p2 with replacement
-               [parent2     (selection-roulette last-gen fits)]
-               ;   Create children c1, c2 from parents
-               [cross-point (random strlen)]
+               [parent1     (selection-roulette last-gen fits)]                 ; Pick p1 with replacement
+               [parent2     (selection-roulette last-gen fits)]                 ; Pick p2 with replacement
+               [cross-point (random strlen)]                                    ; Create children c1, c2 from parents
                [children    (crossover-one-point parent1 parent2 cross-point)]
-               ;   Mutate both children
-               [mutated-c1  (mutate-fn mutate-prob (car  children))]
+               [mutated-c1  (mutate-fn mutate-prob (car  children))]            ; Mutate both children
                [mutated-c2  (mutate-fn mutate-prob (cadr children))])
-          ;   Add mutated children to next population
-          (loop (- i 1) (append acc (list mutated-c1 mutated-c2))))))
+          (loop (- i 1) (append acc (list mutated-c1 mutated-c2))))))           ; Add mutated children to next population
 
     ; Initialize the next population as an empty list
     ; For half the population size, do
     (loop (floor (/ popsize 2)) '()))
 
 
+  ;; Add the best from a previous generation to the new generation
+  ;; TODO - Do I need to shuffle here?
   (define (elitism best pop)
     (cons best (cdr (shuffle pop))))
 
 
+  ;; Start the GA
   (define (master-loop pop)
     (let* ([fits        (map fitness-fn pop)]   ; Assess each individual
            [zipfits     (zip fits pop)]         ; Pair individuals with population
            [curr-best   (argmax car zipfits)])  ; Find the best in the current population
       (display curr-best) (newline)
-      (if (>= (car curr-best) cutoff)    ; If best is good enough, return it
-        curr-best                        ; returns a pair of (fitness . individual)
+      (if (>= (car curr-best) cutoff)           ; If best is good enough, return it
+        curr-best                               ; returns a pair of (fitness . individual)
         (if use-elitism
           (master-loop (elitism (cdr curr-best) (create-next-gen selection-type pop fits popsize strlen)))
           (master-loop (create-next-gen selection-type pop fits popsize strlen))))))
 
 
-  ; Initialize population of individuals
-  (let ([init-pop (initialize-population create-fn strlen popsize)])
-    (master-loop init-pop)))
+  ; Initialize population of individuals and start the GA loop
+  (master-loop (initialize-population create-fn strlen popsize)))
