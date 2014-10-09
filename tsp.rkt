@@ -10,7 +10,7 @@
 ;; **********
 
 (struct args     (file sep col) #:transparent)
-(struct settings (restart pause mutation crossover selection) #:transparent)
+(struct settings (restart pause mutation crossover selection mutation-prob) #:transparent)
 
 ;; ************
 ;; Command Line
@@ -23,8 +23,8 @@
 ;; Global params
 ;; *************
 
-;; Settings for the current run. This is updated by the GUI layer with the desired choices
-(define *settings*          (settings #f #t "Random" "Random" "Random"))
+;; Looping var
+(define *i* 0)
 
 ;; A handle to the thread responsible for looping and rendering the genetic algorithm
 (define *ga-thread*         null)
@@ -33,7 +33,7 @@
 (define *popsize*           100)
 
 ;; The tournament size used in tournement selection
-(define *tournament-size*   15)
+(define *tournament-size*   20)
 
 ;; The probability that the best individual will be chosen in *tournament selection*
 (define *prob-best*         0.65)
@@ -42,7 +42,11 @@
 (define *num-best-children* 2)
 
 ;; The probability that a given child will be mutated when created
-(define *mutation-rate*     (/ 1 *popsize*))
+;(define *mutation-rate*     0.5)
+;(define *mutation-rate*     (/ 1 *popsize*))
+
+;; Settings for the current run. This is updated by the GUI layer with the desired choices
+(define *settings*          (settings #f #t "Random" "Random" "Random" 0.5))
 
 ;; Coordinate system identifiers for a random tour and the Berlin52 problem
 (define *rcoords*           (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
@@ -147,9 +151,9 @@
 ;; **********
 
 (define (random-selection tsize bprob ranked-base popsize)
-  (let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
+  ;(let* ([ss (vector (selection-tournament tsize bprob) (selection-ranked ranked-base popsize))]
   ;(let* ([ss (vector (selection-ranked ranked-base popsize))]
-  ;(let* ([ss (vector (selection-tournament tsize bprob))]
+  (let* ([ss (vector (selection-tournament tsize bprob))]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
@@ -308,7 +312,16 @@
                               [callback (lambda (choice event)
                                          (set! *settings* (struct-copy settings *settings* [crossover (send choice get-string-selection)])))]))
 
-(define *i* 0)
+(define mutation-slider (new slider% [parent middle-row-panel]
+                             [label "Mutation Prob"]
+                             [min-value 0]
+                             [max-value 100]
+                              [callback (lambda (choice event)
+                                         (set! *settings* (struct-copy settings *settings*
+                                                                       [mutation-prob (/ (send choice get-value) 100)])))]))
+
+(send mutation-slider set-value (inexact->exact (* 100 (settings-mutation-prob *settings*))))
+
 (define (new-run)
   (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
          [xmin   (car  (argmin car  (car population)))]
@@ -321,8 +334,7 @@
     (set! *settings* (struct-copy settings *settings* [pause #f]))
     (set! *ga-thread* (thread (lambda () (loop (send crossover-choice get-string-selection)
                                                (send mutation-choice get-string-selection)
-                                               population *popsize* strlen (world null xmin xmax ymin ymax) *mutation-rate*))))))
-;(display (send choice get-string-selection)) (newline))])
+                                               population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*)))))))
 
 (define (string->crossover lbl)
   (cond [(eq? lbl "Random") null]
