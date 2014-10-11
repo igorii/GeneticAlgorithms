@@ -1,5 +1,6 @@
 #lang racket
 
+(require racket/match)
 (require racket/gui)
 (require "util.rkt"
          "general-ga.rkt"
@@ -41,10 +42,6 @@
 ;; The expected number of children that the best individual will create when using *ranked selection*
 (define *num-best-children* 2)
 
-;; The probability that a given child will be mutated when created
-;(define *mutation-rate*     0.5)
-;(define *mutation-rate*     (/ 1 *popsize*))
-
 ;; Settings for the current run. This is updated by the GUI layer with the desired choices
 (define *settings*          (settings #f #t "Random" "Random" "Random" 0.5))
 
@@ -63,6 +60,14 @@
   (sqrt (+ (sqr (- (car  p1) (car  p2)))
            (sqr (- (cadr p1) (cadr p2))))))
 
+;; Return a range within 0 and the given max
+(define (get-range m)
+  (let* ([r1           (random m)]
+         [r2           (random m)]
+         [point-a      (if (> r1 r2) r2 r1)]
+         [point-b      (if (> r1 r2) r1 r2)])
+    (list point-a point-b)))
+
 ;; *******
 ;; Fitness
 ;; *******
@@ -79,31 +84,40 @@
 ;; Crossovers
 ;; **********
 
+;; Determine the crossover functoin associated with the given label
 (define (lbl->crossover-fn lbl)
   (cond [(eq? lbl "Random")           (random-crossover)]
         [(eq? lbl "Position Based")   crossover-position-based]
         [(eq? lbl "Partially Mapped") crossover-partially-mapped]))
 
+;; Return a random crossover function
 (define (random-crossover)
   (let* ([cs (vector crossover-position-based crossover-partially-mapped)]
          [r (random (vector-length cs))])
     (vector-ref cs r)))
 
+;; Select two individuals from the given population with replacement and return
+;; a child of the two selected parents. The child will be mutated with probability
+;; specified by `mutation-rate`
 (define (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate)
   (let* ([select (random-selection tsize bprob nbest popsize)]
          [p1        (select fpop)]
          [p2        (select fpop)]
          [cfn       (lbl->crossover-fn (settings-crossover *settings*))]
-         [mfn       (lbl->mutation-fn (settings-mutation *settings*))]
+         [mfn       (lbl->mutation-fn  (settings-mutation  *settings*))]
          [candidate (cfn (cdr p1) (cdr p2) strlen)])
     (if (chance mutation-rate)
       (mfn candidate strlen)
       candidate)))
 
-;; TODO - generate second child
+;; Perform a position-based crossover on the given two parents.
+;; This will decide with a probability of 0.5 for each element in p1 whether
+;; it should be included in the child. If yes, it is placed in the child at the
+;; index it appears in p1. Otherwise, a null is added temprarily, and later filled
+;; in by the unused elements in order of appearance in p2.
 (define (crossover-position-based p1 p2 strlen)
   (define (get-from-p1 p1 acc used)
-    (cond [(null? p1) (list acc used)]
+    (cond [(null? p1)   (list acc used)]
           [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
           [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
   (let* ([post-p1 (get-from-p1 p1 '() #hash())]
@@ -113,7 +127,10 @@
 (define (crossover-injection p1 p2) null)
 (define (crossover-order p1 p2) null)
 
-;; TODO - generate second child
+;; Perform a partially-mapped crossover on the given two parents. A region will
+;; be selected within the parents. Elements within the region will be added to the
+;; child at the index they appear in p1. Unused elements will be added from p2 in
+;; the order that they appear in p2.
 (define (crossover-partially-mapped p1 p2 strlen) 
   (define (phase1 p1 p2 a b tour used-map)
     (define (loop pos tour p1 p2 used-map)
@@ -135,14 +152,9 @@
                         (hash-set used-map (car p2) #t))]))
     (loop 0 tour '() p1 p2 used-map))
 
-  (let* ([r1           (random strlen)]       ; Create two random points for crossover
-         [r2           (random strlen)]
-         [point-a      (if (> r1 r2) r2 r1)]  ; Get the min point for corssover
-         [point-b      (if (> r1 r2) r1 r2)]  ; Get the max point for crossover
-         [used-map     #hash()]               ; Store used cities here to avoid linear lookup
-         [tour         '()]
-         [post-phase1  (phase1 p1 p2 point-a point-b tour used-map)]
-         [post-phase2  (phase2 p1 p2 point-a point-b (car post-phase1) (cadr post-phase1))]
+  (let* ([points       (get-range strlen)]
+         [post-phase1  (phase1 p1 p2 (car points) (cadr points) '() #hash())]
+         [post-phase2  (phase2 p1 p2 (car points) (cadr points) (car post-phase1) (cadr post-phase1))]
          [post-phase3  (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
     post-phase3))
 
@@ -205,12 +217,11 @@
       ;(display sprobs) (newline)
       (select r sprobs sorted))))                               ; Determine which individual was chosen
 
-;((selection-ranked 2 3) (list (list 1 1) (list 5 1) (list 4 1)))
-
 ;; *********
 ;; Mutations
 ;; *********
 
+;; Returns a mutation operation from a given label
 (define (lbl->mutation-fn lbl)
   (cond [(eq? lbl "Random") (random-mutation)]
         [(eq? lbl "Inversion") mutation-inversion]
@@ -218,36 +229,33 @@
         [(eq? lbl "Insertion") mutation-insertion]
         [(eq? lbl "Exchange")  mutation-exchange]))
 
+;; Returns a random mutation operation
 (define (random-mutation)
-  ;(let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion)]
   (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
-  ;(let* ([ms (vector mutation-insertion mutation-exchange)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
 
+;; Unused
 (define (mutation-displaced-inversion) null)
 (define (mutation-displacement individual strlen) null)
 
-(define (mutation-inversion individual strlen)
-  (let* ([r1     (random strlen)]
-         [r2     (random strlen)]
-         [a      (if (< r1 r2) r1 r2)]
-         [b      (if (< r1 r2) r2 r1)]
-         [start  (take individual a)]
+;; Private helper mutation for performing an operation on an inner sublist
+(define (inner-mutation op individual strlen)
+  (match-define (list a b) (get-range strlen))
+  (let* ([start  (take individual a)]
          [middle (take (drop individual a) (- b a))]
          [end    (drop individual (+ a (- b a)))])
-    (append start (reverse middle) end)))
+    (append start (op middle) end)))
 
+;; Mutate an individual by reversing an inner sublist
+(define (mutation-inversion individual strlen)
+  (inner-mutation reverse individual strlen))
+
+;; Mutate an individual by shuffling an inner sublist
 (define (mutation-scramble individual strlen)
-  (let* ([r1 (random strlen)]
-         [r2 (random strlen)]
-         [a  (if (< r1 r2) r1 r2)]
-         [b  (if (< r1 r2) r2 r1)]
-         [start (take individual a)]
-         [mid   (take (drop individual a) (- b a))]
-         [end   (drop individual (+ a (- b a)))])
-    (append start (shuffle mid) end)))
+  (inner-mutation shuffle individual strlen))
 
+;; Mutate an individual by switching two of its elements
 (define (mutation-exchange individual strlen)
   (let* ([v (list->vector individual)]
          [a (random strlen)]
@@ -257,6 +265,8 @@
     (vector-set! v b c)
     (vector->list v)))
 
+;; Mutate an individual by moving a sublist to another position within
+;; the tour
 (define (mutation-insertion individual strlen)
   (let* ([a (random strlen)]
          [b (random strlen)]
@@ -268,11 +278,14 @@
 ;; Initialization
 ;; **************
 
+;; Create a random tour simpyl by shuffling the possible cities
 (define (create-random-tour domain)
   (lambda (_) (shuffle domain)))
 
+;; Create a new population by creating popsize many new tours
+;; New tours are added to a hash map to avoid introducing duplicates
 (define (create-new-pop fpop tsize bprob nbest popsize strlen mutation-rate)
-  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate)) 
+  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate))
        (range 0 popsize)))
 
 ;; ***
@@ -304,22 +317,23 @@
                               [label "Selection"]
                               [choices (list "Random" "Ranked" "Tournament")]
                               [callback (lambda (choice event)
-                                         (set! *settings* (struct-copy settings *settings* [selection (send choice get-string-selection)])))]))
+                                          (set! *settings* (struct-copy settings *settings* [selection (send choice get-string-selection)])))]))
 
 (define crossover-choice (new choice% [parent middle-row-panel]
                               [label "Crossover"]
                               [choices (list "Random" "Position Based" "Partially Mapped")]
                               [callback (lambda (choice event)
-                                         (set! *settings* (struct-copy settings *settings* [crossover (send choice get-string-selection)])))]))
+                                          (set! *settings* (struct-copy settings *settings* [crossover (send choice get-string-selection)])))]))
 
 (define mutation-slider (new slider% [parent middle-row-panel]
                              [label "Mutation Prob"]
                              [min-value 0]
                              [max-value 100]
-                              [callback (lambda (choice event)
+                             [callback (lambda (choice event)
                                          (set! *settings* (struct-copy settings *settings*
                                                                        [mutation-prob (/ (send choice get-value) 100)])))]))
 
+;; Initialize the slider
 (send mutation-slider set-value (inexact->exact (* 100 (settings-mutation-prob *settings*))))
 
 (define (new-run)
@@ -335,10 +349,6 @@
     (set! *ga-thread* (thread (lambda () (loop (send crossover-choice get-string-selection)
                                                (send mutation-choice get-string-selection)
                                                population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*)))))))
-
-(define (string->crossover lbl)
-  (cond [(eq? lbl "Random") null]
-        [(eq? lbl "Partially Mapped") null]))
 
 ;; *******
 ;; Drawing
