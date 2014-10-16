@@ -407,8 +407,8 @@
 
 (if (not *verbose*)
   (begin 
-  (start-gui)
-  (new-run-thread))
+    (start-gui)
+    (new-run-thread))
 
   (let ([p1 ((create-random-tour *coords*) null)]
         [p2 ((create-random-tour *coords*) null)])
