@@ -24,6 +24,8 @@
 ;; Global params
 ;; *************
 
+(define *verbose* #t)
+
 ;; Looping var
 (define *i* 0)
 
@@ -46,7 +48,7 @@
 (define *settings*          (settings #f #t "Random" "Random" "Random" 0.5))
 
 ;; Coordinate system identifiers for a random tour and the Berlin52 problem
-(define *rcoords*           (map (λ (_) (list (random 1000) (random 1000))) (range 0 40)))
+(define *rcoords*           (map (lambda (_) (list (random 1000) (random 1000))) (range 0 40)))
 (define *coords*            (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 
 ;; *****
@@ -67,6 +69,10 @@
          [point-a      (if (> r1 r2) r2 r1)]
          [point-b      (if (> r1 r2) r1 r2)])
     (list point-a point-b)))
+
+(define (convert-to-nums individual)
+  (let ([h (make-hash (zip *coords* (range 0 (length *coords*))))])
+    (map (lambda (x) (hash-ref h x null)) individual)))
 
 ;; *******
 ;; Fitness
@@ -121,8 +127,17 @@
           [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
           [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
   (let* ([post-p1 (get-from-p1 p1 '() #hash())]
-         [unused (get-unused p2 (cadr post-p1))])
-    (fill-nulls unused (car post-p1) '())))
+         [unused (get-unused p2 (cadr post-p1))]
+         [child (fill-nulls unused (car post-p1) '())])
+    (if *verbose* 
+      (begin
+        (display "Position Based Crossover")      (newline)
+        (display "Parent 1: ") (display (convert-to-nums p1))       (newline)
+        (display "Parent 2: ") (display (convert-to-nums p2))       (newline)
+        (display "From p1 : ") (display (convert-to-nums (car post-p1)))  (newline)
+        (display "Child   : ") (display (convert-to-nums child))    (newline))
+      null)
+    child))
 
 (define (crossover-injection p1 p2) null)
 (define (crossover-order p1 p2) null)
@@ -156,6 +171,14 @@
          [post-phase1  (phase1 p1 p2 (car points) (cadr points) '() #hash())]
          [post-phase2  (phase2 p1 p2 (car points) (cadr points) (car post-phase1) (cadr post-phase1))]
          [post-phase3  (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
+    (if *verbose* 
+      (begin
+        (display "Partially Mapped Crossover")       (newline)
+        (display "Parent 1: ") (display (convert-to-nums p1))          (newline)
+        (display "Parent 2: ") (display (convert-to-nums p2))          (newline)
+        (display "Points  : ") (display points)      (newline)
+        (display "Child   : ") (display (convert-to-nums post-phase3)) (newline))
+      null)
     post-phase3))
 
 ;; **********
@@ -209,13 +232,12 @@
     (expt 0.5 i))
 
   (lambda (fpop)
-    (let* ([sorted (sort fpop (λ (a b) (< (car a) (car b))))]   ; Sort the population
+    (let* ([sorted (sort fpop (lambda (a b) (< (car a) (car b))))]   ; Sort the population
            ;; Reverse the probabilities since we are minimizng the scores
-           [probs  (map assign3 (reverse (range 1 (add1 u))))]  ; Assign rank based probabilities
-           [sprobs (scan + 0 probs)]                            ; Scan addition over the probabilities
-           [r      (random)])                                   ; Choose a random individual
-      ;(display sprobs) (newline)
-      (select r sprobs sorted))))                               ; Determine which individual was chosen
+           [probs  (map assign3 (reverse (range 1 (add1 u))))]       ; Assign rank based probabilities
+           [sprobs (scan + 0 probs)]                                 ; Scan addition over the probabilities
+           [r      (random)])                                        ; Choose a random individual
+      (select r sprobs sorted))))                                    ; Determine which individual was chosen
 
 ;; *********
 ;; Mutations
@@ -305,7 +327,7 @@
 
 (define restart-btn (new button% [parent top-row-panel]
                          [label "Restart"]
-                         [callback (lambda (button event) (new-run))]))
+                         [callback (lambda (button event) (new-run-thread))]))
 
 (define mutation-choice (new choice% [parent middle-row-panel]
                              [label "Mutation"]
@@ -336,6 +358,10 @@
 ;; Initialize the slider
 (send mutation-slider set-value (inexact->exact (* 100 (settings-mutation-prob *settings*))))
 
+(define (new-run-thread)
+  (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
+  (set! *ga-thread* (thread new-run)))
+
 (define (new-run)
   (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
          [xmin   (car  (argmin car  (car population)))]
@@ -343,12 +369,11 @@
          [ymin   (cadr (argmin cadr (car population)))]
          [ymax   (cadr (argmax cadr (car population)))]
          [strlen (length (car population))])
-    (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
     (set! *i* 0)
     (set! *settings* (struct-copy settings *settings* [pause #f]))
-    (set! *ga-thread* (thread (lambda () (loop (send crossover-choice get-string-selection)
-                                               (send mutation-choice get-string-selection)
-                                               population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*)))))))
+    (loop (send crossover-choice get-string-selection)
+          (send mutation-choice get-string-selection)
+          population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*))))
 
 ;; *******
 ;; Drawing
@@ -361,15 +386,28 @@
            [fpop  (zip fits oldpop)]
            [best  (argmin car fpop)]
            [worst (argmax car fpop)])
-      (set! *i* (add1 *i*))
-      (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
-      (loop crossover mutation 
-            (append (cdr (create-new-pop fpop *tournament-size* *prob-best* *num-best-children* popsize strlen mutation-rate)) (list (cdr best))) 
-            popsize strlen w mutation-rate))))
+      (cond [(< (car best) 7550)
+             (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))]
+            [(> *i* 1200) (new-run)]
+            [else
+              (set! *i* (add1 *i*))
+              (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
+              (loop crossover mutation 
+                    (append (cdr (create-new-pop fpop *tournament-size* *prob-best* *num-best-children* popsize strlen mutation-rate)) (list (cdr best))) 
+                    popsize strlen w mutation-rate)]))))
 
 ;; *****
 ;; Start
 ;; *****
 
-(start-gui)
-(new-run)
+(if (not *verbose*)
+  (begin 
+  (start-gui)
+  (new-run-thread))
+
+  (let ([p1 ((create-random-tour *coords*) null)]
+        [p2 ((create-random-tour *coords*) null)])
+    (crossover-position-based   p1 p2 (length p1))
+    (crossover-partially-mapped p1 p2 (length p1))
+    null))
+
