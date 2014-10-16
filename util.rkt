@@ -1,6 +1,7 @@
 #lang racket
 
 (provide chance zip insert-at fill-nulls get-coords-from-file scan)
+
 (define (zip l1 l2) (map cons l1 l2))
 (define (chance percent-true) (>= percent-true (random)))
 (define (insert-at lst pos x)

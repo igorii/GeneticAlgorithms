@@ -134,7 +134,7 @@
         (display "Position Based Crossover")      (newline)
         (display "Parent 1: ") (display (convert-to-nums p1))       (newline)
         (display "Parent 2: ") (display (convert-to-nums p2))       (newline)
-        (display "From p1 : ") (display (convert-to-nums (car post-p1)))  (newline)
+        (display "From p1 : ") (display (map (lambda (x) (if (null? x) #\_ x)) (convert-to-nums (car post-p1))))  (newline)
         (display "Child   : ") (display (convert-to-nums child))    (newline))
       null)
     child))
@@ -177,9 +177,14 @@
         (display "Parent 1: ") (display (convert-to-nums p1))          (newline)
         (display "Parent 2: ") (display (convert-to-nums p2))          (newline)
         (display "Points  : ") (display points)      (newline)
-        (display "Child   : ") (display (convert-to-nums post-phase3)) (newline))
+        (display "Child   : ") (display (add-points-at-indicies (convert-to-nums post-phase3) (list #\_ #\_) points)) (newline))
       null)
     post-phase3))
+
+(define (add-points-at-indicies l vs ps)
+  (let* ([add-1 (insert-at l (car ps) (car vs))]
+         [add-2 (insert-at add-1 (+ 2 (cadr ps)) (cadr vs))]) ;; Add 2 to account for inclusivity
+    add-2))
 
 ;; **********
 ;; Selections
@@ -408,6 +413,7 @@
   (let ([p1 ((create-random-tour *coords*) null)]
         [p2 ((create-random-tour *coords*) null)])
     (crossover-position-based   p1 p2 (length p1))
+    (newline)
     (crossover-partially-mapped p1 p2 (length p1))
     null))
 
