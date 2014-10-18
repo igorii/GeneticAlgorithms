@@ -117,9 +117,8 @@
 
 
   ;; Add the best from a previous generation to the new generation
-  ;; TODO - Do I need to shuffle here?
   (define (elitism best pop)
-    (cons best (cdr (shuffle pop))))
+    (cons best (cdr pop)))
 
 
   ;; Start the GA

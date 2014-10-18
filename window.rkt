@@ -1,6 +1,6 @@
 #lang racket
 
-(provide update-tour-view start-gui frame)
+(provide update-tour-view start-gui frame main-panel)
 (provide (struct-out world))
 
 (require racket/gui/base)
@@ -8,8 +8,8 @@
 
 (struct world (points xmin xmax ymin ymax))
 
-(define *width* 400)
-(define *height* 400)
+(define *width* 600)
+(define *height* 600)
 
 ;; ****************
 ;; Add GUI elements
@@ -20,7 +20,9 @@
                    [width *width*]
                    [height (+ 100 *height*)]))
 
-(define canvas (instantiate animated-canvas% (frame)
+(define main-panel (new horizontal-panel% [parent frame]))
+
+(define canvas (instantiate animated-canvas% (main-panel)
                             [style '(border)]
                             [min-width *width*] 
                             [min-height *height*]))
