@@ -18,7 +18,7 @@
 
 ;; Selection algorithm settings
 ;;     This is held in a struct to give an interface to select functions
-(struct s-select (tsize bprob ranked-base popsize))
+(struct s-select (tsize bprob ranked-base popsize) #:transparent)
 
 ;; ************
 ;; Command Line
@@ -40,7 +40,7 @@
 (define *ga-thread*         null)
 
 ;; The population size used in the genetic algorithm
-(define *popsize*           60)
+(define *popsize*           50)
 
 ;; The tournament size used in tournement selection
 (define *tournament-size*   8)
@@ -119,15 +119,15 @@
 ;; Select two individuals from the given population with replacement and return
 ;; a child of the two selected parents. The child will be mutated with probability
 ;; specified by `mutation-rate`
-(define (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate)
+(define (tsp-crossover ranked settings tsize bprob fpop nbest strlen popsize)
   (let* ([select-settings (s-select tsize bprob nbest popsize)]
-         [sfn       (lbl->selection    (settings-selection *settings*))]
-         [cfn       (lbl->crossover-fn (settings-crossover *settings*))]
-         [mfn       (lbl->mutation-fn  (settings-mutation  *settings*))]
-         [p1        (sfn fpop select-settings)]
-         [p2        (sfn fpop select-settings)]
+         [sfn       (lbl->selection    (settings-selection settings))]
+         [cfn       (lbl->crossover-fn (settings-crossover settings))]
+         [mfn       (lbl->mutation-fn  (settings-mutation  settings))]
+         [p1        (sfn fpop select-settings ranked)]
+         [p2        (sfn fpop select-settings ranked)]
          [candidate (cfn (cdr p1) (cdr p2) strlen)])
-    (if (chance mutation-rate)
+    (if (chance (settings-mutation-prob settings))
       (mfn candidate strlen)
       candidate)))
 
@@ -212,19 +212,15 @@
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
-(define (selection-tournament fpop select-settings)
+(define (selection-tournament fpop select-settings _)
   (let* ([tpop (take (shuffle fpop) (s-select-tsize select-settings))])   ; Select the individuals for tournament
     (if (chance (s-select-bprob select-settings))
       (first (sort tpop (lambda (x y) (< (car x) (car y)))))              ; bprob % of the time take the best
       (first (shuffle tpop)))))                                           ; Otherwise take a random one
 
-(define (selection-ranked fpop select-settings)
+(define (rank-pop select-settings fpop popsize)
   (define base (s-select-ranked-base select-settings))
   (define u    (s-select-popsize     select-settings))
-  (define (select r probs fpop)
-    (if (< r (car probs))
-      (car fpop)
-      (select r (cdr probs) (cdr fpop))))
 
   ;; Assign a probability based on the following:
   ;;     @see slide 25 - howgaswork1.pdf
@@ -256,17 +252,26 @@
   (let* ([sorted (sort fpop (lambda (a b) (< (car a) (car b))))]  ; Sort the population
          ;; Reverse the probabilities since we are minimizng the scores
          [probs  (map assign (reverse (range 0 u)))]       ; Assign rank based probabilities
-         [sprobs (scan + 0 probs)]                         ; Scan addition over the probabilities
-         [r      (random)]                                 ; Choose a random individual
-         [selected (select r sprobs sorted)])              ; Determine which individual was chosen
-    (if *verbose* (printf "\n    Probs: ~a\n    R:     ~a\n    Total: ~a\n" probs r (car (reverse sprobs))) null)
+         [sprobs (scan + 0 probs)])                        ; Scan addition over the probabilities
+    (if *verbose* (printf "\n    Probs: ~a\n     Total: ~a\n" probs (car (reverse sprobs))) null)
+    (list sorted sprobs)))
+
+(define (selection-ranked fpop select-settings ranked)
+  (define (select r probs fpop)
+    (if (< r (car probs))
+      (car fpop)
+      (select r (cdr probs) (cdr fpop))))
+
+  ;; TODO - move sorting to main loop before selection (so it done only once per generation)
+  (let* ([r        (random)]                               ; Choose a random individual
+         [selected (select r (cadr ranked) (car ranked))])              ; Determine which individual was chosen
     selected))
 
 (define (total-fitness fs) (foldl + 0 fs))
 
 ;; (: selection-roulette ( (Listof Chromosome) (Listof Number) -> (Listof Chromosome) ))
 ;; from slide 19
-(define (selection-roulette fpop select-settings)
+(define (selection-roulette fpop select-settings _)
   (define (loop wp partial-sum fpop)
     (let ([next-fitness (+ partial-sum (caar fpop))])
       (cond [(null? (cdr fpop))  (car fpop)]
@@ -344,9 +349,11 @@
 
 ;; Create a new population by creating popsize many new tours
 ;; New tours are added to a hash map to avoid introducing duplicates
-(define (create-new-pop fpop tsize bprob nbest popsize strlen mutation-rate)
-  (map (lambda (_) (tsp-crossover tsize bprob fpop nbest strlen popsize mutation-rate))
-       (range 0 popsize)))
+(define (create-new-pop settings fpop tsize bprob nbest popsize strlen)
+  ;; Sort and rank before crossover
+  (let ([ranked (rank-pop (s-select tsize bprob nbest popsize) fpop popsize)])
+    (map (lambda (_) (tsp-crossover ranked settings tsize bprob fpop nbest strlen popsize))
+         (range 0 popsize))))
 
 ;; ***
 ;; GUI
@@ -404,7 +411,23 @@
   (set! *ga-thread* (thread new-run)))
 
 (define (new-run)
-  (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
+  (new-run-with-params *settings* (s-select *tournament-size* *prob-best* *num-best-children* *popsize*)))
+;  (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
+;         [xmin   (car  (argmin car  (car population)))]
+;         [xmax   (car  (argmax car  (car population)))]
+;         [ymin   (cadr (argmin cadr (car population)))]
+;         [ymax   (cadr (argmax cadr (car population)))]
+;         [strlen (length (car population))])
+;    (set! *i* 0)
+;    (set! *settings* (struct-copy settings *settings* [pause #f]))
+;    (loop *settings*
+;          (s-select *tournament-size* *prob-best* *num-best-children* *popsize*)
+;          (send crossover-choice get-string-selection)
+;          (send mutation-choice get-string-selection)
+;          population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*))))
+
+(define (new-run-with-params popsize algo-settings sel-settings)
+  (let* ([population (initialize-population (create-random-tour *coords*) 0 popsize)]
          [xmin   (car  (argmin car  (car population)))]
          [xmax   (car  (argmax car  (car population)))]
          [ymin   (cadr (argmin cadr (car population)))]
@@ -412,65 +435,360 @@
          [strlen (length (car population))])
     (set! *i* 0)
     (set! *settings* (struct-copy settings *settings* [pause #f]))
-    (loop (send crossover-choice get-string-selection)
-          (send mutation-choice get-string-selection)
-          population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*))))
+    (loop algo-settings
+          sel-settings
+          population 
+          popsize
+          strlen
+          (world null xmin xmax ymin ymax))))
+
+
+
+
+
 
 ;; *******
 ;; Drawing
 ;; *******
-
-(define (loop crossover mutation oldpop popsize strlen w mutation-rate)
+;(struct s-select (tsize bprob ranked-base popsize))
+(define (loop algo-settings sel-settings oldpop popsize strlen w)
   (if (settings-pause *settings*) 
-    (loop crossover mutation oldpop popsize strlen w mutation-rate)
+    (loop algo-settings sel-settings oldpop popsize strlen w)
     (let* ([fits  (map calc-fitness oldpop)]
            [fpop  (zip fits oldpop)]
            [best  (argmin car fpop)]
            [worst (argmax car fpop)])
       (cond 
-        ;[(< (car best) 7550)
-        ; (display best)
-        ; (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))]
-        ;[(> *i* 1200) (new-run)]
+        [(< (car best) 7550) (printf "    -> best ~a\n" (car best)) best]
+        ;(update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))]
+        [(> *i* 1500) best]
         [else
 
           ; Increment the generation counter
           (set! *i* (add1 *i*))
 
           ; Update the tour view
-          (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
+          ;(update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
 
           ; Print the best
-          (display (car best)) (display (convert-to-nums (cdr best))) (newline)
+          ;(display (car best)) (display (convert-to-nums (cdr best))) (newline)
 
           ; Generate the next population and recurse
-          (loop crossover mutation 
-                (append (cdr (create-new-pop fpop *tournament-size* *prob-best* *num-best-children* popsize strlen mutation-rate)) (list (cdr best))) 
-                popsize strlen w mutation-rate)]))))
+          (loop algo-settings sel-settings
+                (append 
+                  (cdr (create-new-pop algo-settings fpop (s-select-tsize sel-settings) (s-select-bprob sel-settings) (s-select-ranked-base sel-settings) popsize strlen)) 
+                  (list (cdr best)))
+                popsize strlen w)]))))
+
+;(define (loop crossover mutation oldpop popsize strlen w mutation-rate)
+;  (if (settings-pause *settings*) 
+;    (loop crossover mutation oldpop popsize strlen w mutation-rate)
+;    (let* ([fits  (map calc-fitness oldpop)]
+;           [fpop  (zip fits oldpop)]
+;           [best  (argmin car fpop)]
+;           [worst (argmax car fpop)])
+;      (cond 
+;        ;[(< (car best) 7550)
+;        ; (display best)
+;        ; (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))]
+;        ;[(> *i* 1200) (new-run)]
+;        [else
+;
+;          ; Increment the generation counter
+;          (set! *i* (add1 *i*))
+;
+;          ; Update the tour view
+;          (update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
+;
+;          ; Print the best
+;          (display (car best)) (display (convert-to-nums (cdr best))) (newline)
+;
+;          ; Generate the next population and recurse
+;          (loop crossover mutation 
+;                (append 
+;                  (cdr (create-new-pop fpop *tournament-size* *prob-best* *num-best-children* popsize strlen mutation-rate)) 
+;                  (list (cdr best)))
+;                popsize strlen w mutation-rate)]))))
 
 ;; *****
 ;; Start
 ;; *****
 
-(if (not *verbose*)
+;(if (not *verbose*)
+;
+;  ;; If verbose is turned off, start the GUI
+;  (begin (start-gui) (new-run-thread))
+;
+;  ;; Otherwise print a bunch of example output
+;  (let ([p1 ((create-random-tour *coords*) null)]
+;        [p2 ((create-random-tour *coords*) null)]
+;        [pop (initialize-population (create-random-tour *coords*) 0 10)])
+;    (crossover-position-based   p1 p2 (length p1)) (newline)
+;    (crossover-partially-mapped p1 p2 (length p1)) (newline)
+;    (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+;    (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+;    (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+;    (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+;    (display "Ranked Selection    ") (display (convert-to-nums (cdr (selection-ranked (zip (map calc-fitness pop) pop) 
+;                                                                                      (s-select 0 0 5 10))))) (newline)
+;    (display "Ranked Selection    ") (display (selection-ranked
+;                                                (list (list 1 1 1) (list 4 4 4) (list 5 5 5))
+;                                                (s-select 0 0 1.5 3))) (newline)
+;    null))
 
-  ;; If verbose is turned off, start the GUI
-  (begin (start-gui) (new-run-thread))
+;(define *settings*          (settings #f #t "Random" "Random" "Random" 0.5))
+(struct params (settings select) #:transparent)
+;; Loop 1500 generations for 5 runs each
+(define *param-list* (list
 
-  ;; Otherwise print a bunch of example output
-  (let ([p1 ((create-random-tour *coords*) null)]
-        [p2 ((create-random-tour *coords*) null)]
-        [pop (initialize-population (create-random-tour *coords*) 0 10)])
-    (crossover-position-based   p1 p2 (length p1)) (newline)
-    (crossover-partially-mapped p1 p2 (length p1)) (newline)
-    (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Ranked Selection    ") (display (convert-to-nums (cdr (selection-ranked (zip (map calc-fitness pop) pop) 
-                                                                                      (s-select 0 0 5 10))))) (newline)
-    (display "Ranked Selection    ") (display (selection-ranked
-                                                (list (list 1 1 1) (list 4 4 4) (list 5 5 5))
-                                                (s-select 0 0 1.5 3))) (newline)
-    null))
+                       ; *0.5 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.65 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.65 2  50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.65 2  50))
 
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.5 2    50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.7 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.9 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 1 2     50))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1    50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1.5  50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 2    50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 5    50))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.5) (s-select 5 0.5 2    50))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.5) (s-select 5 0.5 2    50))
+
+
+                       ; *0.1 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.65 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.65 2  50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.65 2  50))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.5 2    50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.7 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.9 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 1 2     50))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1    50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1.5  50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 2    50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 5    50))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.1) (s-select 5 0.5 2    50))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.1) (s-select 5 0.5 2    50))
+
+
+                       ; *0.05 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.65 2  50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.65 2 50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.65 2 50))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.5 2   50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.7 2  50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.9 2  50))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 1 2    50))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1   50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1.5 50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 2   50))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 5   50))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.05) (s-select 5 0.5 2   50))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.05) (s-select 5 0.5 2   50))
+                       
+
+            ; 100 pop
+                       
+                       ; *0.5 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.65 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.65 2  100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.7 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.9 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 1 2     100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1.5  100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 5    100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.5) (s-select 5 0.5 2    100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.5) (s-select 5 0.5 2    100))
+
+
+                       ; *0.1 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.65 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.65 2  100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.7 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.9 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 1 2     100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1.5  100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 5    100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.1) (s-select 5 0.5 2    100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.1) (s-select 5 0.5 2    100))
+
+
+                       ; *0.05 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.65 2 100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.65 2 100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.5 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.7 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.9 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 1 2    100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1   100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1.5 100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 2   100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 5   100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.05) (s-select 5 0.5 2   100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.05) (s-select 5 0.5 2   100))
+            ; 150 pop
+                       ; *0.5 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.65 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.65 2  100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 12 0.7 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 0.9 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 20 1 2     100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 1.5  100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.5) (s-select 5 0.5 5    100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.5) (s-select 5 0.5 2    100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.5) (s-select 5 0.5 2    100))
+
+
+                       ; *0.1 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.65 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.65 2  100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 12 0.7 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 0.9 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.1) (s-select 20 1 2     100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 1.5  100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 2    100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.1) (s-select 5 0.5 5    100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.1) (s-select 5 0.5 2    100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.1) (s-select 5 0.5 2    100))
+
+
+                       ; *0.05 mutation*
+                       ;; **** Test tournament sizes ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.65 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.65 2 100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.65 2 100))
+
+                       ;; **** Test tournament best probability ****
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 5 0.5 2   100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 12 0.7 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 0.9 2  100))
+                       (params (settings #f #f "Random" "Random" "Tournament" 0.05) (s-select 20 1 2    100))
+
+                       ;; **** Test Ranked Selection Base ****
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1   100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 1.5 100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 2   100))
+                       (params (settings #f #f "Random" "Random" "Ranked"     0.05) (s-select 5 0.5 5   100))
+
+                       ;; **** Test Roulette ****
+                       (params (settings #f #f "Random" "Random" "Roulette"   0.05) (s-select 5 0.5 2   100))
+
+                       ;; **** Test Random ****
+                       (params (settings #f #f "Random" "Random" "Random"     0.05) (s-select 5 0.5 2   100))
+                       ))
+
+
+;; For each in param-list
+;;     run 5 times, keep average
+;;     display params and average
+(define *runs* 5)
+(define *before* 0)
+(define (compare params)
+  (for ([p params])
+       (set! *before* (current-inexact-milliseconds))
+       (printf "Running with Selection(~a) Mutation(~a) TSize(~a) PBest(~a) NBest(~a) Popsize(~a)\n" 
+               (settings-selection     (params-settings p))
+               (settings-mutation-prob (params-settings p))
+               (s-select-tsize         (params-select   p))
+               (s-select-bprob         (params-select   p))
+               (s-select-ranked-base   (params-select   p))
+               (s-select-popsize       (params-select   p)))
+       (let ([avg (/ (foldl + 0 (map (lambda (x)
+                                       (car (new-run-with-params (s-select-popsize (params-select p)) (params-settings p) (params-select p)))
+                                       ) (range 0 *runs*))) 
+                     *runs*)])
+         (printf "     -> avg ~a\n" avg)
+         (printf "     -> mls ~a\n" (/ (- (current-inexact-milliseconds) *before*)))
+         )))
+
+(compare *param-list*)
