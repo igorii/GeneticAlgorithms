@@ -33,9 +33,6 @@
 
 (define *verbose* #f)
 
-;; Looping var
-(define *i* 0)
-
 ;; A handle to the thread responsible for looping and rendering the genetic algorithm
 (define *ga-thread*         null)
 
@@ -43,10 +40,10 @@
 (define *popsize*           50)
 
 ;; The tournament size used in tournement selection
-(define *tournament-size*   8)
+(define *tournament-size*   12)
 
 ;; The probability that the best individual will be chosen in *tournament selection*
-(define *prob-best*         0.85)
+(define *prob-best*         0.65)
 
 ;; The expected number of children that the best individual will create when using *ranked selection*
 (define *num-best-children* 2)
@@ -83,6 +80,8 @@
          [point-a      (if (> r1 r2) r2 r1)]
          [point-b      (if (> r1 r2) r1 r2)])
     (list point-a point-b)))
+(define (callback i best worst w)
+  (update-tour-view (number->string i) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)])))
 
 ;; *******
 ;; Fitness
@@ -411,7 +410,10 @@
   (set! *ga-thread* (thread new-run)))
 
 (define (new-run)
-  (new-run-with-params *settings* (s-select *tournament-size* *prob-best* *num-best-children* *popsize*)))
+  (run-ga2 #:population-size *popsize* 
+           #:algo-settings   *settings* 
+           #:callback        callback
+           #:sel-settings    (s-select *tournament-size* *prob-best* *num-best-children* *popsize*)))
 ;  (let* ([population (initialize-population (create-random-tour *coords*) 0 *popsize*)]
 ;         [xmin   (car  (argmin car  (car population)))]
 ;         [xmax   (car  (argmax car  (car population)))]
@@ -426,59 +428,50 @@
 ;          (send mutation-choice get-string-selection)
 ;          population *popsize* strlen (world null xmin xmax ymin ymax) (settings-mutation-prob *settings*))))
 
-(define (new-run-with-params popsize algo-settings sel-settings)
+
+(define (run-ga2
+          #:population-size popsize
+          #:algo-settings   algo-settings
+          #:cutoff          [cutoff 0]
+          #:max-gen         [max-gen 0]
+          #:callback        [callback (lambda (i best worst world) null)]
+          #:sel-settings    sel-settings)
+
+  ;(struct s-select (tsize bprob ranked-base popsize))
+  (define (loop i oldpop strlen w)
+    (if (settings-pause *settings*) 
+      (loop i oldpop strlen w)
+
+      (let* ([fits  (map calc-fitness oldpop)]
+             [fpop  (zip fits oldpop)]
+             [best  (argmin car fpop)]
+             [worst (argmax car fpop)])
+        (cond [(<= (car best) cutoff)                     (callback i best worst w) best]
+              [(and (not (eq? max-gen 0)) (>= i max-gen)) (callback i best worst w) best]
+              [else
+                (callback i best worst w)
+                (let ([newpop (create-new-pop algo-settings fpop (s-select-tsize sel-settings) (s-select-bprob sel-settings) (s-select-ranked-base sel-settings) popsize strlen)])
+                  (loop (add1 i)
+                        (append (cdr newpop) (list (cdr best)))
+                        strlen 
+                        w))]))))
+
+  ;; Initialize 
   (let* ([population (initialize-population (create-random-tour *coords*) 0 popsize)]
          [xmin   (car  (argmin car  (car population)))]
          [xmax   (car  (argmax car  (car population)))]
          [ymin   (cadr (argmin cadr (car population)))]
          [ymax   (cadr (argmax cadr (car population)))]
          [strlen (length (car population))])
-    (set! *i* 0)
     (set! *settings* (struct-copy settings *settings* [pause #f]))
-    (loop algo-settings
-          sel-settings
+    (loop 0
           population 
-          popsize
           strlen
           (world null xmin xmax ymin ymax))))
-
-
-
-
-
 
 ;; *******
 ;; Drawing
 ;; *******
-;(struct s-select (tsize bprob ranked-base popsize))
-(define (loop algo-settings sel-settings oldpop popsize strlen w)
-  (if (settings-pause *settings*) 
-    (loop algo-settings sel-settings oldpop popsize strlen w)
-    (let* ([fits  (map calc-fitness oldpop)]
-           [fpop  (zip fits oldpop)]
-           [best  (argmin car fpop)]
-           [worst (argmax car fpop)])
-      (cond 
-        [(< (car best) 7550) (printf "    -> best ~a\n" (car best)) best]
-        ;(update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))]
-        [(> *i* 1500) best]
-        [else
-
-          ; Increment the generation counter
-          (set! *i* (add1 *i*))
-
-          ; Update the tour view
-          ;(update-tour-view (number->string *i*) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)]))
-
-          ; Print the best
-          ;(display (car best)) (display (convert-to-nums (cdr best))) (newline)
-
-          ; Generate the next population and recurse
-          (loop algo-settings sel-settings
-                (append 
-                  (cdr (create-new-pop algo-settings fpop (s-select-tsize sel-settings) (s-select-bprob sel-settings) (s-select-ranked-base sel-settings) popsize strlen)) 
-                  (list (cdr best)))
-                popsize strlen w)]))))
 
 ;(define (loop crossover mutation oldpop popsize strlen w mutation-rate)
 ;  (if (settings-pause *settings*) 
@@ -514,27 +507,27 @@
 ;; Start
 ;; *****
 
-;(if (not *verbose*)
-;
-;  ;; If verbose is turned off, start the GUI
-;  (begin (start-gui) (new-run-thread))
-;
-;  ;; Otherwise print a bunch of example output
-;  (let ([p1 ((create-random-tour *coords*) null)]
-;        [p2 ((create-random-tour *coords*) null)]
-;        [pop (initialize-population (create-random-tour *coords*) 0 10)])
-;    (crossover-position-based   p1 p2 (length p1)) (newline)
-;    (crossover-partially-mapped p1 p2 (length p1)) (newline)
-;    (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-;    (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-;    (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-;    (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-;    (display "Ranked Selection    ") (display (convert-to-nums (cdr (selection-ranked (zip (map calc-fitness pop) pop) 
-;                                                                                      (s-select 0 0 5 10))))) (newline)
-;    (display "Ranked Selection    ") (display (selection-ranked
-;                                                (list (list 1 1 1) (list 4 4 4) (list 5 5 5))
-;                                                (s-select 0 0 1.5 3))) (newline)
-;    null))
+(if (not *verbose*)
+
+  ;; If verbose is turned off, start the GUI
+  (begin (start-gui) (new-run-thread))
+
+  ;; Otherwise print a bunch of example output
+  (let ([p1 ((create-random-tour *coords*) null)]
+        [p2 ((create-random-tour *coords*) null)]
+        [pop (initialize-population (create-random-tour *coords*) 0 10)])
+    (crossover-position-based   p1 p2 (length p1)) (newline)
+    (crossover-partially-mapped p1 p2 (length p1)) (newline)
+    (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+    (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+    (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+    (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+    (display "Ranked Selection    ") (display (convert-to-nums (cdr (selection-ranked (zip (map calc-fitness pop) pop) 
+                                                                                      (s-select 0 0 5 10))))) (newline)
+    (display "Ranked Selection    ") (display (selection-ranked
+                                                (list (list 1 1 1) (list 4 4 4) (list 5 5 5))
+                                                (s-select 0 0 1.5 3))) (newline)
+    null))
 
 ;(define *settings*          (settings #f #t "Random" "Random" "Random" 0.5))
 (struct params (settings select) #:transparent)
@@ -614,10 +607,10 @@
 
                        ;; **** Test Random ****
                        (params (settings #f #f "Random" "Random" "Random"     0.05) (s-select 5 0.5 2   50))
-                       
 
-            ; 100 pop
-                       
+
+                       ; 100 pop
+
                        ; *0.5 mutation*
                        ;; **** Test tournament sizes ****
                        (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.65 2   100))
@@ -691,7 +684,7 @@
 
                        ;; **** Test Random ****
                        (params (settings #f #f "Random" "Random" "Random"     0.05) (s-select 5 0.5 2   100))
-            ; 150 pop
+                       ; 150 pop
                        ; *0.5 mutation*
                        ;; **** Test tournament sizes ****
                        (params (settings #f #f "Random" "Random" "Tournament" 0.5) (s-select 5 0.65 2   100))
@@ -784,11 +777,15 @@
                (s-select-ranked-base   (params-select   p))
                (s-select-popsize       (params-select   p)))
        (let ([avg (/ (foldl + 0 (map (lambda (x)
-                                       (car (new-run-with-params (s-select-popsize (params-select p)) (params-settings p) (params-select p)))
+                                       (car (run-ga2 
+                                              #:population-size (s-select-popsize (params-select p)) 
+                                              #:algo-settings   (params-settings p) 
+                                              #:callback        callback
+                                              #:sel-settings    (params-select p)))
                                        ) (range 0 *runs*))) 
                      *runs*)])
          (printf "     -> avg ~a\n" avg)
          (printf "     -> mls ~a\n" (/ (- (current-inexact-milliseconds) *before*)))
          )))
 
-(compare *param-list*)
+;(compare *param-list*)
