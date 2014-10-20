@@ -29,9 +29,11 @@
 ;; Global params
 ;; *************
 
-(define *pause* #f)
+;; Whether to start a GA run, or print sample output of crossovers and mutation
+(define *verbose* #t)
 
-(define *verbose* #f)
+;; Whether the GA thread is paused or not
+(define *pause* #f)
 
 ;; A handle to the thread responsible for looping and rendering the genetic algorithm
 (define *ga-thread* null)
@@ -39,8 +41,7 @@
 ;; Settings for the current run. This is updated by the GUI layer with the desired choices
 (define *gui-settings* (settings "Random" "Random" "Random" 0.5))
 
-;; Coordinate system identifiers for a random tour and the Berlin52 problem
-;(define *coords*           (map (lambda (_) (list (random 1000) (random 1000))) (range 0 20)))
+;; Coordinate system identifiers
 (define *coords* (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 
 ;; *****
@@ -60,8 +61,6 @@
   (let* ([add-1 (insert-at l (car ps) (car vs))]
          [add-2 (insert-at add-1 (+ 2 (cadr ps)) (cadr vs))]) ;; Add 2 to account for inclusivity
     add-2))
-
-;; Return a range within 0 and the given max
 (define (get-range m)
   (let* ([r1           (random m)]
          [r2           (random m)]
@@ -103,7 +102,6 @@
          [r (random (vector-length cs))])
     (vector-ref cs r)))
 
-
 ;; Perform a position-based crossover on the given two parents.
 ;; This will decide with a probability of 0.5 for each element in p1 whether
 ;; it should be included in the child. If yes, it is placed in the child at the
@@ -115,15 +113,15 @@
           [(chance 0.5) (get-from-p1 (cdr p1) (append acc (list (car p1))) (hash-set used (car p1) #t))]
           [else         (get-from-p1 (cdr p1) (append acc (list null)) used)]))
   (let* ([post-p1 (get-from-p1 p1 '() #hash())]
-         [unused (get-unused p2 (cadr post-p1))]
-         [child (fill-nulls unused (car post-p1) '())])
+         [unused  (get-unused p2 (cadr post-p1))]
+         [child   (fill-nulls unused (car post-p1) '())])
     (if *verbose* 
       (begin
         (display "Position Based Crossover")      (newline)
-        (display "Parent 1: ") (display (convert-to-nums p1))       (newline)
-        (display "Parent 2: ") (display (convert-to-nums p2))       (newline)
-        (display "From p1 : ") (display (map (lambda (x) (if (null? x) #\_ x)) (convert-to-nums (car post-p1))))  (newline)
-        (display "Child   : ") (display (convert-to-nums child))    (newline))
+        (display "    Parent 1: ") (display (convert-to-nums p1))       (newline)
+        (display "    Parent 2: ") (display (convert-to-nums p2))       (newline)
+        (display "    From p1 : ") (display (map (lambda (x) (if (null? x) #\_ x)) (convert-to-nums (car post-p1))))  (newline)
+        (display "    Child   : ") (display (convert-to-nums child))    (newline))
       null)
     child))
 
@@ -135,7 +133,9 @@
 ;; child at the index they appear in p1. Unused elements will be added from p2 in
 ;; the order that they appear in p2.
 (define (crossover-partially-mapped p1 p2 strlen) 
+
   (define (phase1 p1 p2 a b tour used-map)
+    ;; Take the points from p1 that are within the given range
     (define (loop pos tour p1 p2 used-map)
       (cond [(null? p1) (list tour used-map)]
             [(> pos b)  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
@@ -144,6 +144,7 @@
     (loop 0 tour p1 p2 used-map))
 
   (define (phase2 p1 p2 a b tour used-map)
+    ;; Move the points from p2 down in order (if they aren't already added)
     (define (loop pos src dest p1 p2 used-map)
       (cond [(null? p1) (list dest used-map)]
             [(and (<= pos b) (>= pos a)) 
@@ -161,11 +162,13 @@
          [post-phase3  (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
     (if *verbose* 
       (begin
-        (display "Partially Mapped Crossover")       (newline)
-        (display "Parent 1: ") (display (convert-to-nums p1))          (newline)
-        (display "Parent 2: ") (display (convert-to-nums p2))          (newline)
-        (display "Points  : ") (display points)      (newline)
-        (display "Child   : ") (display (add-points-at-indicies (convert-to-nums post-phase3) (list #\_ #\_) points)) (newline))
+        (display "Partially Mapped Crossover")                     (newline)
+        (display "    Parent 1: ") (display (add-points-at-indicies (convert-to-nums p1) (list #\| #\|) points))  (newline)
+        (display "    Parent 2: ") (display (add-points-at-indicies (convert-to-nums p2) (list #\| #\|) points))  (newline)
+        (display "    Points  : ") (display points)                (newline)
+        (display "    Part 1  : ") (display (add-points-at-indicies (map (lambda (x) (if (null? x) #\_ x)) (convert-to-nums (car post-phase1))) (list #\| #\|) points))     (newline)
+        (display "    Part 2  : ") (display (add-points-at-indicies (map (lambda (x) (if (null? x) #\_ x)) (convert-to-nums (car post-phase2))) (list #\| #\|) points))    (newline)
+        (display "    Child   : ") (display (add-points-at-indicies (convert-to-nums post-phase3) (list #\| #\|) points)) (newline))
       null)
     post-phase3))
 
@@ -186,6 +189,7 @@
     (vector-ref ss r)))
 
 (define (selection-tournament fpop select-settings _)
+  ;(let* ([tpop (take fpop (s-select-tsize select-settings))])   ; Select the individuals for tournament
   (let* ([tpop (take (shuffle fpop) (s-select-tsize select-settings))])   ; Select the individuals for tournament
     (if (chance (s-select-bprob select-settings))
       (first (sort tpop (lambda (x y) (< (car x) (car y)))))              ; bprob % of the time take the best
@@ -301,14 +305,14 @@
     (vector-set! v b c)
     (vector->list v)))
 
-;; Mutate an individual by moving a sublist to another position within
+;; Mutate an individual by moving a city to another position within
 ;; the tour
 (define (mutation-insertion individual strlen)
   (let* ([a (random strlen)]
          [b (random strlen)]
          [remd (append (take individual a) (drop individual (add1 a)))]
          [v (car (drop individual a))])
-    (if *verbose* (printf "(~a, ~a)  " a b) null)
+    (if *verbose* (printf "~a ~a (~a, ~a)  " remd v a b) null)
     (insert-at remd b v)))
 
 ;; **************
@@ -440,39 +444,43 @@
 (send mutation-slider set-value (inexact->exact (* 100 (settings-mutation-prob *gui-settings*))))
 
 (define tourny-size-field (new text-field% [label "Tournament size"]
-                              [init-value "12"]
-                              [parent middle-row-panel]))
+                               [init-value "12"]
+                               [parent middle-row-panel]))
 (define tourny-best-field (new text-field% [label "Tournament % best"]
-                              [init-value "0.65"]
-                              [parent middle-row-panel]))
+                               [init-value "0.65"]
+                               [parent middle-row-panel]))
 (define ranked-base-field (new text-field% [label "Ranked base"]
-                              [init-value "2"]
-                              [parent middle-row-panel]))
+                               [init-value "2"]
+                               [parent middle-row-panel]))
 (define max-gen-field     (new text-field% [label "Max generations"]
-                              [init-value "1500"]
-                              [parent middle-row-panel]))
+                               [init-value "1500"]
+                               [parent middle-row-panel]))
 (define best-score-field  (new text-field% [label "Cutoff score"]
-                              [init-value "0"]
-                              [parent middle-row-panel]))
+                               [init-value "0"]
+                               [parent middle-row-panel]))
+(define pop-size-field  (new text-field% [label "Population size"]
+                             [init-value "50"]
+                             [parent middle-row-panel]))
 
 (define (new-run-thread)
   (if (thread? *ga-thread*) (kill-thread *ga-thread*) null)
   (set! *ga-thread* (thread new-run)))
 
 (define (new-run)
-  (let ([best (run-ga2 #:population-size 50
-                       #:domain          *coords*
-                       #:crossover       (settings-crossover      *gui-settings*)
-                       #:selection       (settings-selection      *gui-settings*)
-                       #:mutation        (settings-mutation       *gui-settings*)
-                       #:mutation-prob   (settings-mutation-prob  *gui-settings*)
-                       #:cutoff          (string->number (send best-score-field get-value))
-                       #:max-gen         (string->number (send max-gen-field get-value))
-                       #:tourny-size     (string->number (send tourny-size-field get-value))
-                       #:best-prob       (string->number (send tourny-best-field get-value))
-                       #:ranked-base     (string->number (send ranked-base-field get-value))
-                       #:callback        callback)])
-    (if (< 7550 (car best))
+  (let* ([cutoff (string->number (send best-score-field get-value))]
+         [best (run-ga2 #:population-size (string->number (send pop-size-field get-value))
+                        #:domain          *coords*
+                        #:crossover       (settings-crossover      *gui-settings*)
+                        #:selection       (settings-selection      *gui-settings*)
+                        #:mutation        (settings-mutation       *gui-settings*)
+                        #:mutation-prob   (settings-mutation-prob  *gui-settings*)
+                        #:cutoff          cutoff
+                        #:max-gen         (string->number (send max-gen-field get-value))
+                        #:tourny-size     (string->number (send tourny-size-field get-value))
+                        #:best-prob       (string->number (send tourny-best-field get-value))
+                        #:ranked-base     (string->number (send ranked-base-field get-value))
+                        #:callback        callback)])
+    (if (< cutoff (car best))
       (new-run)
       null)))
 
@@ -500,7 +508,7 @@
     (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
            [settings (s-select 0 0 1.5 3)]
            [ranked   (rank-pop settings fpop 3)])
-      (display (selection-ranked fpop settings ranked)) (newline))
+      (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
 
     null))
 
