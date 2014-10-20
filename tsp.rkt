@@ -25,11 +25,11 @@
                             (args file sep (string->number col))))
 
 ;; *************************
-;;       Global params
+;;       Global Params
 ;; *************************
 
 ;; Whether to start a GA run, or print sample output of crossovers and mutation
-(define *verbose* #t)
+(define *verbose* #f)
 
 ;; Whether the GA thread is paused or not
 (define *pause* #f)
@@ -127,9 +127,6 @@
 
     child))
 
-(define (crossover-injection p1 p2) null)
-(define (crossover-order p1 p2) null)
-
 ;; Perform a partially-mapped crossover on the given two parents. A region will
 ;; be selected within the parents. Elements within the region will be added to the
 ;; child at the index they appear in p1. Unused elements will be added from p2 in
@@ -194,13 +191,13 @@
 
 ;; Return a random selection function
 (define (random-selection)
-  (let* ([ss (vector selection-tournament selection-ranked)]
+  (let* ([ss (vector selection-tournament selection-ranked selection-roulette)]
          [r  (random (vector-length ss))])
     (vector-ref ss r)))
 
 ;; Perform a tournament selection on the population. Ignore the last param (ranked)
 ;; since it is unused here.
-(define (selection-tournament fpop select-settings _)
+(define (selection-tournament fpop select-settings _ _2)
   (let* ([tpop (take (shuffle fpop) (s-select-tsize select-settings))])   ; Select the individuals for tournament
     (if (chance (s-select-bprob select-settings))
       (first (sort tpop (lambda (x y) (< (car x) (car y)))))              ; bprob % of the time take the best
@@ -250,7 +247,7 @@
 ;; been assigned at this point and are provided as the third param. This is 
 ;; done ahead of time to avoid computing the ranks *per selection*, since the
 ;; ranks will not change in a single generation.
-(define (selection-ranked fpop select-settings ranked)
+(define (selection-ranked fpop select-settings ranked _)
   ;; Linear search the population while the generated number is 
   ;; greater than the current assigned probability
   (define (select r probs fpop)
@@ -268,13 +265,13 @@
 
 ;; Perform a fitness-proportional selection on the population
 ;; from slide 19
-(define (selection-roulette fpop select-settings _)
-  (define (loop wp partial-sum fpop)
-    (let ([next-fitness (+ partial-sum (caar fpop))])
+(define (selection-roulette fpop select-settings _ maximized-fit)
+  (define (loop wp partial-sum mfit fpop)
+    (let ([next-fitness (+ partial-sum (car mfit))])
       (cond [(null? (cdr fpop))  (car fpop)]
             [(> next-fitness wp) (car fpop)]
-            [else                (loop wp next-fitness (cdr fpop))])))
-  (loop (* (random) (total-fitness (fpop->fits fpop))) 0 fpop))
+            [else                (loop wp next-fitness (cdr mfit) (cdr fpop))])))
+  (loop (* (random) (total-fitness maximized-fit)) 0 maximized-fit fpop))
 
 ;; *************************
 ;;         Mutations
@@ -382,23 +379,32 @@
   ;; Select two individuals from the given population with replacement and return
   ;; a child of the two selected parents. The child will be mutated with probability
   ;; specified by `mutation-rate`
-  (define (tsp-crossover fpop ranked)
+  (define (tsp-crossover fpop ranked maximized-fit)
     (let* ([sfn       (lbl->selection-fn selection)]
            [cfn       (lbl->crossover-fn crossover)]
            [mfn       (lbl->mutation-fn  mutation )]
-           [p1        (sfn fpop select-settings ranked)]
-           [p2        (sfn fpop select-settings ranked)]
+           [p1        (sfn fpop select-settings ranked maximized-fit)]
+           [p2        (sfn fpop select-settings ranked maximized-fit)]
            [candidate (cfn (cdr p1) (cdr p2) strlen)])
       (if (chance mutation-prob)
         (mfn candidate strlen)
         candidate)))
 
+  ;; Invert the minimized fitness to a maxmimized fitness to enable roulette selection
+  (define (maximize-fits fpop worst)
+    (map (lambda (x) (- worst (car x))) fpop))
+
   ;; Create a new population by creating popsize many new tours
   ;; New tours are added to a hash map to avoid introducing duplicates
-  (define (create-new-pop fpop)
+  (define (create-new-pop fpop worst)
     ;; Sort and rank before crossover to avoid sorting on each selection worst case
-    (let ([ranked (rank-pop (s-select tsize bprob ranked-base popsize) fpop popsize)])
-      (map (lambda (_) (tsp-crossover fpop ranked))
+    (let ([ranked        (if (or (eq? selection "Random") (eq? selection "Ranked"))
+                           (rank-pop select-settings fpop popsize) null)]
+          [maximized-fit (if (or (eq? selection "Random") (eq? selection "Roulette"))
+                           (maximize-fits fpop worst) null)])
+
+      ;; Perform *popsize* many crossovers to generate new pop
+      (map (lambda (_) (tsp-crossover fpop ranked maximized-fit))
            (range 0 popsize))))
 
   ;; Elitism ensures that the best genetic material is not lost when swapping
@@ -411,8 +417,11 @@
   ;;    3) Generate next generation from current generation selection/crossover/mutation
   ;;    4) Swap the current generation for the next and repeat
   (define (loop i oldpop strlen w)
+    ;; If paused, do nothing
     (if *pause*
       (loop i oldpop strlen w)
+
+      ;; Otherwise perform GA stepsj
       (let* ([fits    (map calc-fitness oldpop)]
              [fpop    (zip fits oldpop)]
              [best    (argmin car fpop)]
@@ -421,9 +430,9 @@
                (callback i best worst w) best]
               [(and (not (eq? max-gen 0)) (>= i max-gen))
                (callback i best worst w) best]
-              [else 
+              [else
                 (callback i best worst w)
-                (loop (add1 i) (elitism (create-new-pop fpop) (cdr best)) strlen w)]))))
+                (loop (add1 i) (elitism (create-new-pop fpop (car worst)) (cdr best)) strlen w)]))))
 
   ;; Initialize the population and set up the canvas dimensions
   ;; Then kick off the GA
@@ -530,7 +539,6 @@
       (new-run)
       null)))
 
-
 ;; *************************
 ;;         Start
 ;; *************************
@@ -559,17 +567,16 @@
       (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
              [settings (s-select 0 0 1.5 3)]
              [ranked   (rank-pop settings fpop 3)])
-        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
+        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked null)))
 
       (newline)
       (display "Ranked Selection (s=2)")
       (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
              [settings (s-select 0 0 2 3)]
              [ranked   (rank-pop settings fpop 3)])
-        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
+        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked null)))
 
       null)))
 
-;; Call main to start
 (main)
 
