@@ -4,9 +4,9 @@
 (require racket/gui)
 (require "util.rkt" "general-ga.rkt" "window.rkt")
 
-;; **********
-;; Structures
-;; **********
+;; *************************
+;;        Structures
+;; *************************
 
 ;; Command line arguments
 (struct args (file sep col) #:transparent)
@@ -14,23 +14,22 @@
 ;; Genetic Algorithm settings
 (struct settings (mutation crossover selection mutation-prob) #:transparent)
 
-;; Selection algorithm settings
-;;     This is held in a struct to give an interface to select functions
+;; Selection algorithm settings - this is held in a struct to give an interface to select functions
 (struct s-select (tsize bprob ranked-base popsize) #:transparent)
 
-;; ************
-;; Command Line
-;; ************
+;; *************************
+;;       Command Line
+;; *************************
 
 (define cargs (command-line #:args (file sep col)
                             (args file sep (string->number col))))
 
-;; *************
-;; Global params
-;; *************
+;; *************************
+;;       Global params
+;; *************************
 
 ;; Whether to start a GA run, or print sample output of crossovers and mutation
-(define *verbose* #f)
+(define *verbose* #t)
 
 ;; Whether the GA thread is paused or not
 (define *pause* #f)
@@ -45,9 +44,9 @@
 (define *coords* (get-coords-from-file (args-file cargs) (args-sep cargs) (args-col cargs)))
 ;(define *coords* (map (lambda (x) (list (* 1000 (random)) (* 1000 (random)))) (range 0 30)))
 
-;; *****
-;; Utils
-;; *****
+;; *************************
+;;          Utils
+;; *************************
 
 (define (fpop->pop  fpop) (map cdr fpop))
 (define (fpop->fits fpop) (map car fpop))
@@ -71,9 +70,9 @@
 (define (callback i best worst w)
   (update-tour-view (number->string i) (number->string (car best)) (number->string (car worst)) (struct-copy world w [points (cdr best)])))
 
-;; *******
-;; Fitness
-;; *******
+;; *************************
+;;         Fitness
+;; *************************
 
 ;; The fitness of a tour is the distance traveled along the tour. This is calculated
 ;; by summing the distances between the points, and adding the distance between the 
@@ -87,9 +86,9 @@
                        (cdr individual))])
     (+ outside (cadr inside))))        ; Add the internal tour and the first and last point
 
-;; **********
-;; Crossovers
-;; **********
+;; *************************
+;;        Crossovers
+;; *************************
 
 ;; Determine the crossover function associated with the given label
 (define (lbl->crossover-fn lbl)
@@ -117,7 +116,7 @@
          [unused  (get-unused p2 (cadr post-p1))]
          [child   (fill-nulls unused (car post-p1) '())])
 
-    (if *verbose* 
+    (if *verbose*
       (begin
         (displayln "Position Based Crossover")
         (display "    Parent 1: ") (displayln (convert-to-nums p1))
@@ -140,23 +139,28 @@
   (define (phase1 p1 p2 a b tour used-map)
     ;; Take the points from p1 that are within the given range
     (define (loop pos tour p1 p2 used-map)
-      (cond [(null? p1) (list tour used-map)]
-            [(> pos b)  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
-            [(< pos a)  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
-            [else       (loop (add1 pos) (append tour (list (car p1))) (cdr p1) (cdr p2) (hash-set used-map (car p1) #t))]))
+      (cond [(null? p1)                (list tour used-map)]
+            ;; If not in the range, add a null to the tour to be filled in later
+            [(or (< pos a) (> pos b))  (loop (add1 pos) (append tour (list null)) (cdr p1) (cdr p2) used-map)]
+            ;; Otherwise we are in the range, so add the head of p1 to the tour and recurse
+            [else                      (loop (add1 pos) (append tour (list (car p1))) (cdr p1) (cdr p2) (hash-set used-map (car p1) #t))]))
     (loop 0 tour p1 p2 used-map))
 
   (define (phase2 p1 p2 a b tour used-map)
     ;; Move the points from p2 down in order (if they aren't already added)
     (define (loop pos src dest p1 p2 used-map)
       (cond [(null? p1) (list dest used-map)]
-            [(and (<= pos b) (>= pos a)) 
+            [(and (<= pos b) (>= pos a))
+             ;; If in the range, skip
              (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
-            [(hash-has-key? used-map (car p2)) 
+            [(hash-has-key? used-map (car p2))
+             ;; If the city has already been added, skip
              (loop (add1 pos) (cdr src) (append dest (list (car src))) (cdr p1) (cdr p2) used-map)]
-            [else (loop (add1 pos) (cdr src) 
-                        (append dest (list (car p2))) (cdr p1) (cdr p2) 
-                        (hash-set used-map (car p2) #t))]))
+            [else 
+              ;; Otherwise add the city from p2 to the same index in the tour
+              (loop (add1 pos) (cdr src)
+                    (append dest (list (car p2))) (cdr p1) (cdr p2) 
+                    (hash-set used-map (car p2) #t))]))
     (loop 0 tour '() p1 p2 used-map))
 
   (let* ([points       (get-range strlen)]
@@ -164,7 +168,7 @@
          [post-phase2  (phase2 p1 p2 (car points) (cadr points) (car post-phase1) (cadr post-phase1))]
          [child        (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
 
-    (if *verbose* 
+    (if *verbose*
       (begin
         (displayln "Partially Mapped Crossover")
         (display "    Parent 1: ") (displayln (add-points-at-indicies (convert-to-nums p1) (list #\| #\|) points))
@@ -177,12 +181,12 @@
 
     child))
 
-;; **********
-;; Selections
-;; **********
+;; *************************
+;;        Selections
+;; *************************
 
 ;; Return the selection function with the given name
-(define (lbl->selection lbl)
+(define (lbl->selection-fn lbl)
   (cond [(eq? lbl "Random")     (random-selection)]
         [(eq? lbl "Tournament") selection-tournament]
         [(eq? lbl "Roulette")   selection-roulette]
@@ -226,19 +230,18 @@
   ;; P(i) = --------
   ;;        u(u + 1)
   ;;
-  (define (assign2 i)
+  (define (_assign1 i)
     (/ (* 2 i)
        (* u (add1 u))))
 
   ;; Assign a probability based on the function given in the assignment description:
   ;; P(i) = p^r
-  (define (assign3 i)
+  (define (_assign2 i)
     (expt 0.5 i))
 
-  ;; TODO - move sorting to main loop before selection (so it done only once per generation)
   (let* ([sorted (sort fpop (lambda (a b) (< (car a) (car b))))]  ; Sort the population
          [probs  (map assign (reverse (range 0 u)))]              ; Assign rank based probabilities
-                                                                  ; Reverse the probabilities since we are minimizng the scores
+         ; Reverse the probabilities since we are minimizng the scores
          [sprobs (scan + 0 probs)])                               ; Scan addition over the probabilities
     (if *verbose* (printf "\n     Probs: ~a\n     Total: ~a\n" probs (car (reverse sprobs))) null)
     (list sorted sprobs)))
@@ -273,9 +276,9 @@
             [else                (loop wp next-fitness (cdr fpop))])))
   (loop (* (random) (total-fitness (fpop->fits fpop))) 0 fpop))
 
-;; *********
-;; Mutations
-;; *********
+;; *************************
+;;         Mutations
+;; *************************
 
 ;; Returns a mutation operation from a given label
 (define (lbl->mutation-fn lbl)
@@ -290,10 +293,6 @@
   (let* ([ms (vector mutation-insertion mutation-exchange mutation-inversion mutation-scramble)]
          [r (random (vector-length ms))])
     (vector-ref ms r)))
-
-;; Unused
-(define (mutation-displaced-inversion) null)
-(define (mutation-displacement individual strlen) null)
 
 ;; Private helper mutation for performing an operation on an inner sublist
 (define (inner-mutation op individual strlen)
@@ -333,31 +332,46 @@
     (if *verbose* (printf "~a ~a (~a, ~a)  " remd v a b) null)
     (insert-at remd b v)))
 
-;; **************
-;; Initialization
-;; **************
+;; *************************
+;;      Initialization
+;; *************************
 
 ;; Create a random tour simpyl by shuffling the possible cities
 (define (create-random-tour domain)
   (lambda (_) (shuffle domain)))
 
-;; *****************
-;; Genetic Algorithm
-;; *****************
+;; *************************
+;;    Genetic Algorithm
+;; *************************
 
+;; Genetic Algorithm for TSP
+;;   Named ga2 to avoid collision with general-ga
+;;   Keywords:
+;;     population-size - The size of the population
+;;     domain          - The domain of the individual strings
+;;     crossover       - The crossover operation to use
+;;     mutation        - The mutation operator to use
+;;     selection       - The selection operator to use
+;;     mutation-prob   - The probability that a given child will be mutated
+;;     cutoff          - A score that, when reached, the GA will stop
+;;     max-gen         - The GA will stop after producing this many generations
+;;     tourny-size     - The size of a tournament for tournament selection
+;;     best-prob       - The probability that the best individual in a tourny is selected
+;;     ranked-base     - The expected number of offspring for the best individual (0 < s <= 2)
+;;     callback        - Called with the best individual in every generation
 (define (run-ga2
-          #:population-size popsize
-          #:domain          domain
+          #:population-size [popsize         50]
+          #:domain          [domain  (list 0 1)]
           #:crossover       [crossover "Random"]
           #:mutation        [mutation  "Random"]
           #:selection       [selection "Random"]
-          #:mutation-prob   [mutation-prob 0.5]
-          #:cutoff          [cutoff          0]
-          #:max-gen         [max-gen         0]
-          #:tourny-size     [tsize          12]
-          #:best-prob       [bprob        0.65]
-          #:ranked-base     [ranked-base     2]
-          #:callback        [callback        (lambda (i best worst world) null)])
+          #:mutation-prob   [mutation-prob  0.5]
+          #:cutoff          [cutoff           0]
+          #:max-gen         [max-gen          0]
+          #:tourny-size     [tsize           12]
+          #:best-prob       [bprob         0.65]
+          #:ranked-base     [ranked-base      2]
+          #:callback        [callback         (lambda (i best worst world) null)])
 
   ;; Convenience for passing to selection functions
   (define select-settings (s-select tsize bprob ranked-base popsize))
@@ -369,7 +383,7 @@
   ;; a child of the two selected parents. The child will be mutated with probability
   ;; specified by `mutation-rate`
   (define (tsp-crossover fpop ranked)
-    (let* ([sfn       (lbl->selection    selection)]
+    (let* ([sfn       (lbl->selection-fn selection)]
            [cfn       (lbl->crossover-fn crossover)]
            [mfn       (lbl->mutation-fn  mutation )]
            [p1        (sfn fpop select-settings ranked)]
@@ -389,10 +403,13 @@
 
   ;; Elitism ensures that the best genetic material is not lost when swapping
   ;; generations. Add the current best to the next generation.
-  (define (elitism pop best)
-    (cons best (cdr pop)))
+  (define (elitism pop best) (cons best (cdr pop)))
 
-  ;(struct s-select (tsize bprob ranked-base popsize))
+  ;; Main GA Loop
+  ;;    1) Calculate fitness for all individuals
+  ;;    2) Select the best individual and determine if good enough
+  ;;    3) Generate next generation from current generation selection/crossover/mutation
+  ;;    4) Swap the current generation for the next and repeat
   (define (loop i oldpop strlen w)
     (if *pause*
       (loop i oldpop strlen w)
@@ -419,9 +436,9 @@
     (set! *pause* #f)
     (loop 0 population strlen (world null xmin xmax ymin ymax))))
 
-;; ***
-;; GUI
-;; ***
+;; *************************
+;;           GUI
+;; *************************
 
 (define option-panel     (new vertical-panel% [parent main-panel]))
 (define middle-row-panel (new vertical-panel% [parent option-panel] [alignment (list 'left 'center)]))
@@ -497,58 +514,62 @@
 ;; appearing in the GUI. The GA will loop until the cutoff is observed.
 (define (new-run)
   (let* ([cutoff (string->number (send best-score-field get-value))]
-         [best (run-ga2 #:population-size (string->number (send pop-size-field get-value))
-                        #:domain          *coords*
-                        #:crossover       (settings-crossover      *gui-settings*)
-                        #:selection       (settings-selection      *gui-settings*)
-                        #:mutation        (settings-mutation       *gui-settings*)
-                        #:mutation-prob   (settings-mutation-prob  *gui-settings*)
-                        #:cutoff          cutoff
-                        #:max-gen         (string->number (send max-gen-field get-value))
-                        #:tourny-size     (string->number (send tourny-size-field get-value))
-                        #:best-prob       (string->number (send tourny-best-field get-value))
-                        #:ranked-base     (string->number (send ranked-base-field get-value))
-                        #:callback        callback)])
+         [best   (run-ga2 #:population-size (string->number (send pop-size-field get-value))
+                          #:domain          *coords*
+                          #:crossover       (settings-crossover      *gui-settings*)
+                          #:selection       (settings-selection      *gui-settings*)
+                          #:mutation        (settings-mutation       *gui-settings*)
+                          #:mutation-prob   (settings-mutation-prob  *gui-settings*)
+                          #:cutoff          cutoff
+                          #:max-gen         (string->number (send max-gen-field get-value))
+                          #:tourny-size     (string->number (send tourny-size-field get-value))
+                          #:best-prob       (string->number (send tourny-best-field get-value))
+                          #:ranked-base     (string->number (send ranked-base-field get-value))
+                          #:callback        callback)])
     (if (< cutoff (car best))
       (new-run)
       null)))
 
 
-;; *****
-;; Start
-;; *****
+;; *************************
+;;         Start
+;; *************************
 
-(if (not *verbose*)
+(define (main)
+  (if (not *verbose*)
 
-  ;; If verbose is turned off, start the GUI
-  (begin (start-gui) (new-run-thread))
+    ;; If verbose is turned off, start the GUI
+    (begin (start-gui) (new-run-thread))
 
-  ;; Otherwise print a bunch of example output
-  (let* ([p1 ((create-random-tour *coords*) null)]
-         [p2 ((create-random-tour *coords*) null)]
-         [pop (initialize-population (create-random-tour *coords*) 0 10)])
-    (newline)
-    (crossover-position-based   p1 p2 (length p1)) (newline)
-    (crossover-partially-mapped p1 p2 (length p1)) (newline)
-    (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
-    (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+    ;; Otherwise print a bunch of example output
+    (let* ([p1 ((create-random-tour *coords*) null)]
+           [p2 ((create-random-tour *coords*) null)]
+           [pop (initialize-population (create-random-tour *coords*) 0 10)])
+      (newline)
+      (crossover-position-based   p1 p2 (length p1)) (newline)
+      (crossover-partially-mapped p1 p2 (length p1)) (newline)
+      (display "Mutation Inversion  ") (display (mutation-inversion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+      (display "Mutation Scramble   ") (display (mutation-scramble  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+      (display "Mutation Exchange   ") (display (mutation-exchange  (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
+      (display "Mutation Insertion  ") (display (mutation-insertion (list 1 2 3 4 5 6 7 8 9 10) 10)) (newline)
 
-    ;; Ranked Selection examples from notes
-    (newline)
-    (display "Ranked Selection (s=1.5)")
-    (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
-           [settings (s-select 0 0 1.5 3)]
-           [ranked   (rank-pop settings fpop 3)])
-      (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
+      ;; Ranked Selection examples from notes
+      (newline)
+      (display "Ranked Selection (s=1.5)")
+      (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
+             [settings (s-select 0 0 1.5 3)]
+             [ranked   (rank-pop settings fpop 3)])
+        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
 
-    (newline)
-    (display "Ranked Selection (s=2)")
-    (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
-           [settings (s-select 0 0 2 3)]
-           [ranked   (rank-pop settings fpop 3)])
-      (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
+      (newline)
+      (display "Ranked Selection (s=2)")
+      (let* ([fpop     (list (list 1 1 1) (list 4 4 4) (list 5 5 5))]
+             [settings (s-select 0 0 2 3)]
+             [ranked   (rank-pop settings fpop 3)])
+        (printf "     Result: ~a\n" (selection-ranked fpop settings ranked)))
 
-    null))
+      null)))
+
+;; Call main to start
+(main)
 
