@@ -17,7 +17,7 @@ Assignment for Comp 5206 - Evolutionary Computation - Carleton University
 
 There is a boolean flag in the code named `*example*`. When this is `#t`, the program will output crossover, mutation, and selection examples. 
 
-When `*example*` is set to `#f`, the given filename specifying city locations will be opened, and a GUI depicting controls for a GA on the given city list.
+When `*example*` is set to `#f`, the given filename specifying city locations will be opened, and a GUI depicting controls for a GA on the given city list will be displayed.
 
     $ racket tsp.rkt <filename> <separator> <column>
 
