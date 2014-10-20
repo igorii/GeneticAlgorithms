@@ -29,7 +29,7 @@
 ;; *************************
 
 ;; Whether to start a GA run, or print sample output of crossovers and mutation
-(define *verbose* #f)
+(define *example* #f)
 
 ;; Whether the GA thread is paused or not
 (define *pause* #f)
@@ -116,7 +116,7 @@
          [unused  (get-unused p2 (cadr post-p1))]
          [child   (fill-nulls unused (car post-p1) '())])
 
-    (if *verbose*
+    (if *example*
       (begin
         (displayln "Position Based Crossover")
         (display "    Parent 1: ") (displayln (convert-to-nums p1))
@@ -165,7 +165,7 @@
          [post-phase2  (phase2 p1 p2 (car points) (cadr points) (car post-phase1) (cadr post-phase1))]
          [child        (fill-nulls (get-unused p2 (cadr post-phase2)) (car post-phase2) '())])
 
-    (if *verbose*
+    (if *example*
       (begin
         (displayln "Partially Mapped Crossover")
         (display "    Parent 1: ") (displayln (add-points-at-indicies (convert-to-nums p1) (list #\| #\|) points))
@@ -240,7 +240,7 @@
          [probs  (map assign (reverse (range 0 u)))]              ; Assign rank based probabilities
          ; Reverse the probabilities since we are minimizng the scores
          [sprobs (scan + 0 probs)])                               ; Scan addition over the probabilities
-    (if *verbose* (printf "\n     Probs: ~a\n     Total: ~a\n" probs (car (reverse sprobs))) null)
+    (if *example* (printf "\n     Probs: ~a\n     Total: ~a\n" probs (car (reverse sprobs))) null)
     (list sorted sprobs)))
 
 ;; Perform ranked selection on a population. Rank probabilities have already
@@ -257,7 +257,7 @@
 
   (let* ([r        (random)]                               ; Choose a random individual
          [selected (select r (cadr ranked) (car ranked))]) ; Determine which individual was chosen
-    (if *verbose* (printf "     R: ~a\n" r) null)
+    (if *example* (printf "     R: ~a\n" r) null)
     selected))
 
 ;; Determine the total fitness of the population
@@ -297,7 +297,7 @@
   (let* ([start  (take individual a)]
          [middle (take (drop individual a) (- b a))]
          [end    (drop individual (+ a (- b a)))])
-    (if *verbose* (printf "(~a, ~a)  " a b) null)
+    (if *example* (printf "(~a, ~a)  " a b) null)
     (append start (op middle) end)))
 
 ;; Mutate an individual by reversing an inner sublist
@@ -314,7 +314,7 @@
          [a (random strlen)]
          [b (random strlen)]
          [c (vector-ref v a)])
-    (if *verbose* (printf "(~a, ~a)  " a b) null)
+    (if *example* (printf "(~a, ~a)  " a b) null)
     (vector-set! v a (vector-ref v b))
     (vector-set! v b c)
     (vector->list v)))
@@ -326,7 +326,7 @@
          [b (random strlen)]
          [remd (append (take individual a) (drop individual (add1 a)))]
          [v (car (drop individual a))])
-    (if *verbose* (printf "~a ~a (~a, ~a)  " remd v a b) null)
+    (if *example* (printf "~a ~a (~a, ~a)  " remd v a b) null)
     (insert-at remd b v)))
 
 ;; *************************
@@ -421,7 +421,7 @@
     (if *pause*
       (loop i oldpop strlen w)
 
-      ;; Otherwise perform GA stepsj
+      ;; Otherwise perform GA steps
       (let* ([fits    (map calc-fitness oldpop)]
              [fpop    (zip fits oldpop)]
              [best    (argmin car fpop)]
@@ -544,9 +544,9 @@
 ;; *************************
 
 (define (main)
-  (if (not *verbose*)
+  (if (not *example*)
 
-    ;; If verbose is turned off, start the GUI
+    ;; If example is turned off, start the GUI
     (begin (start-gui) (new-run-thread))
 
     ;; Otherwise print a bunch of example output
